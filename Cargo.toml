@@ -7,3 +7,5 @@ description = "Stress testing. In early development, should not be used."
 license = "MIT"
 
 [dependencies]
+futures-preview = "0.3.0-alpha.16"
+romio = "0.3.0-alpha.9"
