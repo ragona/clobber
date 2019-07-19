@@ -8,3 +8,5 @@ license = "MIT"
 
 [dependencies]
 failure = "0.1.5"
+futures-preview = "0.3.0-alpha.17"
+romio = "0.3.0-alpha.9"

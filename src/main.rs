@@ -1,81 +1,60 @@
-use std::io::prelude::*;
-use std::net::{TcpListener, TcpStream};
-use std::thread;
-use std::sync::mpsc::{Sender, Receiver};
-use std::sync::mpsc;
-use std::future::Future;
+#![feature(async_await)]
 
-use failure::{Error, err_msg};
+use std::io;
+use std::thread;
+
+use futures::executor::{self, ThreadPool};
+use futures::io::{AllowStdIo, AsyncReadExt, AsyncWriteExt};
+use futures::task::SpawnExt;
+use futures::StreamExt;
+
+use romio::{TcpListener, TcpStream};
 use std::time::Duration;
 
-pub type Result<T> = std::result::Result<T, Error>;
+const HOST: &str = "127.0.0.1:8000";
+const REQUEST: &[u8] = b"GET /";
 
-const HOST:&str = "127.0.0.1:8080";
-const NUM_THREADS:u8 = 4;
+fn main() -> io::Result<()> {
+    executor::block_on(async {
 
-fn connect() -> Result<()> {
-    let mut stream = TcpStream::connect(HOST)?;
+        let mut threadpool = ThreadPool::new().unwrap();
 
-//    stream.write(b"foo")?;
-    let mut buf =  String::new();
+        for i in 0..10 {
+            threadpool
+                .spawn(async move {
+                    let mut stream = TcpStream::connect(&"127.0.0.1:8000".parse().unwrap()).await;
 
-    stream.read_to_string(&mut buf)?;
-    dbg!(buf);
+                    match stream {
+                        Ok(mut s) => {
+                            s.write_all(&REQUEST).await;
+                        }
+                        Err(e) => {
+                            dbg!(e);
+                        }
+                    }
+                })
+                .unwrap();
+        }
+    });
+
+
+
+//    thread::sleep(Duration::from_millis(500)); // how to block appropriately?
+
     Ok(())
 }
-
-
-fn main() -> Result<()> {
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn handle_client(mut stream: TcpStream) {
-        stream.write(b"foo").expect("Failed to write to stream");
-    }
-
-    // test server
-    fn listen() -> Result<()> {
-        let listener = TcpListener::bind(HOST)?;
-
-        // accept connections and process them serially
-        for stream in listener.incoming() {
-            handle_client(stream?);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn client_test() -> Result<()> {
-        // dedicated test thread for server
-        thread::spawn(move || {
-            listen().expect("failed to listen");
-        });
-
-        // wait for active listener
-        loop {
-            match connect() {
-                Err(_) => { thread::sleep(Duration::from_millis(1)); },
-                _ => { break; }
-            }
-        };
-
-        let mut threads = vec![];
-
-        for _ in 0..NUM_THREADS {
-            threads.push(thread::spawn(move || {
-                connect().expect("failed to connect");
-            }))
-        }
-
-        for thread in threads {
-            thread.join().expect("Child thread failed");
-        }
-
-        Ok(())
-    }
-}
+//    executor::block_on(async {
+//        let mut threadpool = ThreadPool::new()?;
+//
+//        for i in 0..10 {
+//
+//            threadpool
+//                .spawn(async move {
+//                    let mut stream = TcpStream::connect(&HOST.parse().unwrap());
+//                    stream.write(&REQUEST).await?;
+//                })
+//                .unwrap();
+//        }
+//
+//        Ok(())
+//    })
