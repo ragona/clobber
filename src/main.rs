@@ -10,10 +10,14 @@ use futures::io::{AllowStdIo, AsyncReadExt, AsyncWriteExt};
 use romio::TcpStream;
 use juliex;
 
-const HOST: &str = "127.0.0.1:8000";
-const REQUEST: &[u8] = b"GET /";
-const REQUESTS_PER_SECOND: u64 = 1000;
-const TOTAL_REQUESTS: u64 = 10000;
+const HOST: &str = "127.0.0.1:7878";
+const TOTAL_REQUESTS: u64 = 100000;
+const REQUESTS_PER_SECOND: u64 = 10000;
+const REQUEST: &[u8] = b"GET / HTTP/1.1
+Host: localhost:8000
+User-Agent: clobber
+Accept: */*\n
+";
 
 fn main() -> io::Result<()> {
     let delay = 1e9 as u64 / REQUESTS_PER_SECOND;
@@ -28,7 +32,7 @@ fn main() -> io::Result<()> {
                         s.close().await.expect("Failed to close socket");
                     }
                     Err(e) => {
-                        eprintln!("{}", e);
+                        eprintln!("Failed to connect: '{}'", e);
                     }
                 }
             });
@@ -39,5 +43,3 @@ fn main() -> io::Result<()> {
 
     Ok(())
 }
-
-
