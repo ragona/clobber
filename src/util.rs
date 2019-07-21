@@ -1,5 +1,6 @@
-use rand;
 use std::net::{Ipv4Addr, SocketAddrV4, SocketAddr};
+
+use rand::{self, Rng};
 
 pub fn random_ipv4_addr(port: u16) -> SocketAddr {
     let random_bytes = rand::thread_rng().gen::<[u8; 4]>();
