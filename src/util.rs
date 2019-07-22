@@ -1,3 +1,5 @@
+// Currently excluded from module tree. Rand adds a ton of dependencies and slows build time. :(
+
 use std::net::{Ipv4Addr, SocketAddrV4, SocketAddr};
 
 use rand::{self, Rng};
