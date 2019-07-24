@@ -11,7 +11,7 @@ User-Agent: clobber
 Accept: */*\n
 ";
 
-pub fn clobber(settings: ClobberSettings) {
+pub fn clobber(settings: &ClobberSettings, message: String) {
     // If there is no defined rate, we'll go as fast as we can
     let delay = match settings.rate {
         0 => None,
@@ -24,6 +24,9 @@ pub fn clobber(settings: ClobberSettings) {
 
     let mut thread_handles = vec![];
     for _ in 0..settings.num_threads {
+        // copy the messages; each thread gets a body to use
+        let m = message.clone();
+
         thread_handles.push(thread::spawn(move || {
             // one connection per thread
             let mut stream = TcpStream::connect(addr).expect("Failed to connect");
@@ -33,7 +36,7 @@ pub fn clobber(settings: ClobberSettings) {
                 // track how long this request takes
                 let start = Instant::now();
                 // write our request
-                match stream.write(settings.payload) {
+                match stream.write(m.as_bytes()) {
                     Ok(_) => (),
                     // some clients break the pipe after each request
                     Err(ref e) if e.kind() == std::io::ErrorKind::BrokenPipe => {

@@ -6,65 +6,66 @@ use std::io::Read;
 
 pub mod tcp_client;
 
-
 #[derive(Debug, Copy, Clone)]
 pub struct ClobberSettings {
+    num_threads: u16,
     target: Ipv4Addr,
     port: u16,
     rate: u64,
-    num_threads: u16,
-    payload: &'static [u8],
 }
 
-
 fn main() -> std::io::Result<()> {
-    let matches = cli();
+    let cli = cli();
+    let settings = ClobberSettings::new(cli.get_matches());
 
-    let target = matches
-        .value_of("target")
-        .expect("Failed to parse target")
-        .parse::<Ipv4Addr>()
-        .expect("Failed to parse target");
+    //    let mut buf = vec![];
+    //    let stdin = io::stdin().read_to_end(&mut buf);
+    //    let payload = match stdin {
+    //        Ok(len) => &buf,
+    //        Err(_) => &tcp_client::DEFAULT_REQUEST,
+    //    };
 
-    let port = matches
-        .value_of("port")
-        .unwrap_or("80")
-        .parse::<u16>()
-        .expect("Failed to parse port");
-
-    let rate = matches
-        .value_of("rate")
-        .unwrap_or("0")
-        .parse::<u64>()
-        .expect("Failed to parse rate");
-
-    let num_threads = matches
-        .value_of("threads")
-        .unwrap_or("4")
-        .parse::<u16>()
-        .expect("Failed to parse number of threads");
-
-//    let mut buf = vec![];
-//    let stdin = io::stdin().read_to_end(&mut buf);
-//    let payload = match stdin {
-//        Ok(len) => &buf,
-//        Err(_) => &tcp_client::DEFAULT_REQUEST,
-//    };
-
-    let payload = tcp_client::DEFAULT_REQUEST;
-
-    tcp_client::clobber(ClobberSettings {
-        rate,
-        port,
-        target,
-        payload,
-        num_threads,
-    });
+    tcp_client::clobber(&settings, String::from("GET / HTTP/1.1\n"));
 
     Ok(())
 }
 
-fn cli() -> ArgMatches<'static> {
+impl ClobberSettings {
+    pub fn new(matches: ArgMatches) -> ClobberSettings {
+        let target = matches
+            .value_of("target")
+            .expect("Failed to parse target")
+            .parse::<Ipv4Addr>()
+            .expect("Failed to parse target");
+
+        let port = matches
+            .value_of("port")
+            .unwrap_or("80")
+            .parse::<u16>()
+            .expect("Failed to parse port");
+
+        let rate = matches
+            .value_of("rate")
+            .unwrap_or("0")
+            .parse::<u64>()
+            .expect("Failed to parse rate");
+
+        let num_threads = matches
+            .value_of("threads")
+            .unwrap_or("4")
+            .parse::<u16>()
+            .expect("Failed to parse number of threads");
+
+        ClobberSettings {
+            target,
+            port,
+            rate,
+            num_threads,
+        }
+    }
+}
+
+fn cli() -> App<'static, 'static> {
     App::new("clobber")
         .version("0.1")
         .author("ryan ragona <ryan@ragona.com>")
@@ -98,5 +99,4 @@ fn cli() -> ArgMatches<'static> {
                 .help("Number of threads")
                 .takes_value(true),
         )
-        .get_matches()
 }
