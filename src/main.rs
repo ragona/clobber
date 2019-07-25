@@ -1,7 +1,10 @@
-use clap::{App, Arg, ArgMatches};
+#[allow(unused_imports)]
+use std::io::{stdin, Read};
 use std::net::Ipv4Addr;
 
-use std::io::{stdin, Read};
+use clap::{App, Arg, ArgMatches};
+
+use log::{info, warn};
 
 use crate::tcp_client::Message;
 
@@ -21,13 +24,29 @@ fn main() -> std::io::Result<()> {
     let cli = cli();
     let settings = ClobberSettings::new(cli.get_matches());
 
+    setup_logger().expect("Failed to setup logger");
+
+    let (sender, receiver) = crossbeam_channel::unbounded();
+
+    // catch ctrl and gracefully shut down child threads
+    std::thread::spawn(move || {
+        ctrlc::set_handler(move || {
+            info!("Shutting down");
+            for _ in 0..settings.num_threads {
+                sender
+                    .send(())
+                    .expect("Failed to send close message to child thread");
+            }
+        })
+    });
+
     // read from stdin todo: Add option to give file path
     let mut lines: Vec<u8> = vec![];
     stdin().read_to_end(&mut lines).unwrap();
     let message = Message::new(lines);
 
     // run until interrupt todo: add graceful ctrl + c
-    tcp_client::clobber(&settings, message);
+    tcp_client::clobber(&settings, message, receiver);
 
     Ok(())
 }
@@ -101,4 +120,22 @@ fn cli() -> App<'static, 'static> {
                 .help("Number of threads")
                 .takes_value(true),
         )
+}
+
+fn setup_logger() -> Result<(), fern::InitError> {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{}[{}][{}] {}",
+                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
+        .level(log::LevelFilter::Debug)
+        .chain(std::io::stdout())
+        .chain(fern::log_file("clobber.log")?)
+        .apply()?;
+    Ok(())
 }
