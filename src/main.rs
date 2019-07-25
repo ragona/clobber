@@ -17,13 +17,13 @@ pub struct ClobberSettings {
 }
 
 fn main() -> std::io::Result<()> {
+    // startup the cli first or stdin will block
     let cli = cli();
-    let mut lines: Vec<u8> = vec![];
-
-    // todo: Add option to give file path
-    stdin().read_to_end(&mut lines).unwrap();
-
     let settings = ClobberSettings::new(cli.get_matches());
+
+    // read from stdin todo: Add option to give file path
+    let mut lines: Vec<u8> = vec![];
+    stdin().read_to_end(&mut lines).unwrap();
     let message = Message::new(lines);
 
     // run until interrupt todo: add graceful ctrl + c
