@@ -3,8 +3,8 @@ use std::io::{stdin, Read};
 use std::net::Ipv4Addr;
 
 use clap::{App, Arg, ArgMatches};
-
-use log::{info, warn};
+use crossbeam_channel::Sender;
+use log::info;
 
 use crate::tcp_client::Message;
 
@@ -20,33 +20,20 @@ pub struct ClobberSettings {
 }
 
 fn main() -> std::io::Result<()> {
-    // startup the cli first or stdin will block
     let cli = cli();
     let settings = ClobberSettings::new(cli.get_matches());
 
     setup_logger().expect("Failed to setup logger");
 
+    // this channel is for closing child threads
     let (sender, receiver) = crossbeam_channel::unbounded();
 
-    // catch ctrl and gracefully shut down child threads
+    // catch interrupt and gracefully shut down child threads
     std::thread::spawn(move || {
-        ctrlc::set_handler(move || {
-            info!("Shutting down");
-            for _ in 0..settings.num_threads {
-                sender
-                    .send(())
-                    .expect("Failed to send close message to child thread");
-            }
-        })
+        shutdown(sender, settings);
     });
 
-    // read from stdin todo: Add option to give file path
-    let mut lines: Vec<u8> = vec![];
-    stdin().read_to_end(&mut lines).unwrap();
-    let message = Message::new(lines);
-
-    // run until interrupt todo: add graceful ctrl + c
-    tcp_client::clobber(&settings, message, receiver);
+    tcp_client::clobber(settings, build_message(settings), receiver);
 
     Ok(())
 }
@@ -138,4 +125,28 @@ fn setup_logger() -> Result<(), fern::InitError> {
         .chain(fern::log_file("clobber.log")?)
         .apply()?;
     Ok(())
+}
+
+fn build_message(_settings: ClobberSettings) -> Message {
+    let mut lines: Vec<u8> = vec![];
+    match stdin().read_to_end(&mut lines) {
+        Ok(_) => {}
+        Err(_) => {
+            lines.append(&mut b"GET /".to_vec());
+        }
+    }
+
+    Message::new(lines)
+}
+
+fn shutdown(closer: Sender<()>, settings: ClobberSettings) {
+    ctrlc::set_handler(move || {
+        info!("Shutting down");
+        for _ in 0..settings.num_threads {
+            closer
+                .send(())
+                .expect("Failed to send close message to child thread");
+        }
+    })
+    .expect("Failed to set ctrlc handler");
 }

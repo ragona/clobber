@@ -1,12 +1,12 @@
-#[allow(unused_imports)]
-use log::{info, warn};
 use std::io::prelude::*;
 use std::net::{SocketAddr, SocketAddrV4, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::ClobberSettings;
 use crossbeam_channel::{Receiver, TryRecvError};
+use log::{error, info, warn};
+
+use crate::ClobberSettings;
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -36,13 +36,10 @@ impl Metrics {
     }
 }
 
-pub fn clobber(settings: &ClobberSettings, message: Message, close: Receiver<()>) {
-    // If there is no defined rate, we'll go as fast as we can
+pub fn clobber(settings: ClobberSettings, message: Message, close: Receiver<()>) {
     let delay = match settings.rate {
         0 => None,
-        _ => Some(Duration::from_nanos(
-            (1e9 as u64 / settings.rate) * settings.num_threads as u64,
-        )),
+        _ => Some(Duration::from_nanos(1e9 as u64 / settings.rate) * settings.num_threads as u32),
     };
 
     let addr: SocketAddr = SocketAddrV4::new(settings.target, settings.port).into();
@@ -53,12 +50,17 @@ pub fn clobber(settings: &ClobberSettings, message: Message, close: Receiver<()>
         let rcv = close.clone();
         let mut thread_metrics = Metrics::new();
 
+        // sleep here to stagger worker threads
+        spin_sleep::sleep(Duration::from_millis(1000 / settings.num_threads as u64));
+
         thread_handles.push(thread::spawn(move || {
-            // one connection per thread
+            // todo: don't panic on connection failure
             let mut stream = TcpStream::connect(addr).expect("Failed to connect");
-            stream.set_nodelay(true).expect("Failed to set_nodelay");
 
             loop {
+                let start = Instant::now();
+
+                // stop the thread if we receive anything from the close receiver
                 match rcv.try_recv() {
                     Ok(_) | Err(TryRecvError::Disconnected) => {
                         info!("Closing child thread");
@@ -67,17 +69,14 @@ pub fn clobber(settings: &ClobberSettings, message: Message, close: Receiver<()>
                     Err(TryRecvError::Empty) => {}
                 };
 
-                // track how long this request takes
-                let start = Instant::now();
-                // write our request
                 match stream.write(msg.bytes.as_slice()) {
-                    // some clients break the pipe after each request
                     Err(ref e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                        // todo: Figure out a cleaner way to handle broken pipes
                         stream = TcpStream::connect(addr).expect("Failed to reconnect");
                         thread_metrics.reconnects += 1;
                     }
-                    Err(_) => {
-                        eprintln!("Unexpected error");
+                    Err(e) => {
+                        error!("Unexpected error: {}", e);
                         break;
                     }
                     Ok(_) => {
@@ -87,8 +86,11 @@ pub fn clobber(settings: &ClobberSettings, message: Message, close: Receiver<()>
 
                 // only try to obey rate limits if we're keeping up with the intended pace
                 let elapsed = Instant::now() - start;
-                if delay.is_some() && elapsed < delay.unwrap() {
-                    spin_sleep::sleep(delay.unwrap() - elapsed);
+                match delay {
+                    Some(d) => {
+                        spin_sleep::sleep(d - elapsed);
+                    }
+                    None => {}
                 }
             }
 
