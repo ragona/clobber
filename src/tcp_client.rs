@@ -5,13 +5,18 @@ use std::time::{Duration, Instant};
 
 use crate::ClobberSettings;
 
-pub const DEFAULT_REQUEST: &'static [u8] = b"GET / HTTP/1.1
-Host: localhost:8000
-User-Agent: clobber
-Accept: */*\n
-";
+#[derive(Clone)]
+pub struct Message {
+    bytes: Vec<u8>,
+}
 
-pub fn clobber(settings: &ClobberSettings, message: String) {
+impl Message {
+    pub fn new(bytes: Vec<u8>) -> Message {
+        Message { bytes }
+    }
+}
+
+pub fn clobber(settings: &ClobberSettings, message: Message) {
     // If there is no defined rate, we'll go as fast as we can
     let delay = match settings.rate {
         0 => None,
@@ -24,8 +29,8 @@ pub fn clobber(settings: &ClobberSettings, message: String) {
 
     let mut thread_handles = vec![];
     for _ in 0..settings.num_threads {
-        // copy the messages; each thread gets a body to use
-        let m = message.clone();
+        // Each thread should be able to modify its own message, so it needs its own copy
+        let msg = message.clone();
 
         thread_handles.push(thread::spawn(move || {
             // one connection per thread
@@ -36,8 +41,7 @@ pub fn clobber(settings: &ClobberSettings, message: String) {
                 // track how long this request takes
                 let start = Instant::now();
                 // write our request
-                match stream.write(m.as_bytes()) {
-                    Ok(_) => (),
+                match stream.write(msg.bytes.as_slice()) {
                     // some clients break the pipe after each request
                     Err(ref e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
                         stream = TcpStream::connect(addr).expect("Failed to reconnect");
@@ -46,6 +50,7 @@ pub fn clobber(settings: &ClobberSettings, message: String) {
                         eprintln!("Unexpected error");
                         break;
                     }
+                    _ => {}
                 }
 
                 // only try to obey rate limits if we're keeping up with the intended pace

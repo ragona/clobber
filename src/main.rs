@@ -1,8 +1,9 @@
-use std::io;
+use clap::{App, Arg, ArgMatches};
 use std::net::Ipv4Addr;
 
-use clap::{App, Arg, ArgMatches};
-use std::io::Read;
+use std::io::{stdin, Read};
+
+use crate::tcp_client::Message;
 
 pub mod tcp_client;
 
@@ -12,20 +13,21 @@ pub struct ClobberSettings {
     target: Ipv4Addr,
     port: u16,
     rate: u64,
+    // todo: Add duration of run
 }
 
 fn main() -> std::io::Result<()> {
     let cli = cli();
+    let mut lines: Vec<u8> = vec![];
+
+    // todo: Add option to give file path
+    stdin().read_to_end(&mut lines).unwrap();
+
     let settings = ClobberSettings::new(cli.get_matches());
+    let message = Message::new(lines);
 
-    //    let mut buf = vec![];
-    //    let stdin = io::stdin().read_to_end(&mut buf);
-    //    let payload = match stdin {
-    //        Ok(len) => &buf,
-    //        Err(_) => &tcp_client::DEFAULT_REQUEST,
-    //    };
-
-    tcp_client::clobber(&settings, String::from("GET / HTTP/1.1\n"));
+    // run until interrupt todo: add graceful ctrl + c
+    tcp_client::clobber(&settings, message);
 
     Ok(())
 }
