@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, TryRecvError};
 use log::{debug, error, info, trace, warn};
 
-use crate::ClobberSettings;
+use crate::{ClobberSettings, Error, Result};
+use std::thread::JoinHandle;
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -49,14 +50,14 @@ up with more than its fair share of poor connections, we'll see if that's necess
 
 **/
 
-pub fn clobber(settings: ClobberSettings, message: Message, close: Receiver<()>) {
+pub fn clobber(settings: ClobberSettings, message: Message, close: Receiver<()>) -> Result<()> {
     let delay = match settings.rate {
         0 => None,
         _ => Some(Duration::from_nanos(1e9 as u64 / settings.rate) * settings.num_threads as u32),
     };
 
     let addr: SocketAddr = SocketAddrV4::new(settings.target, settings.port).into();
-    let mut thread_handles = vec![];
+    let mut thread_handles: Vec<JoinHandle<Result<()>>> = vec![];
 
     for _ in 0..settings.num_threads {
         let msg = message.clone();
@@ -68,34 +69,11 @@ pub fn clobber(settings: ClobberSettings, message: Message, close: Receiver<()>)
 
         thread_handles.push(thread::spawn(move || {
             // todo: don't panic on connection failure
-            let mut stream = TcpStream::connect(addr).expect("Failed to connect");
+            let mut stream = connect_and_configure(addr)?;
             let mut read_buf = [0u8; 65535];
 
-            loop {
+            while !close_requested(&rcv) {
                 let start = Instant::now();
-
-                // stop the thread if we receive anything from the close receiver
-                match rcv.try_recv() {
-                    Ok(_) | Err(TryRecvError::Disconnected) => {
-                        break;
-                    }
-                    Err(TryRecvError::Empty) => {}
-                };
-
-                // I'm using this to try to see if the connection is open. I have no idea
-                // whether this is a good idea or not.
-                match stream.write(&mut []) {
-                    Err(ref e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-                        // todo: exponential backoff reconnect
-                        // todo: don't panic
-                        stream = TcpStream::connect(addr).expect("Failed to reconnect");
-                        thread_metrics.reconnects += 1;
-                        debug!("reconnect");
-                    }
-                    Ok(_) => trace!("test write succeeded"),
-                    Err(e) => warn!("test write failed with error: {}", e),
-                }
-
                 // todo: Handle partial writes
                 match stream.write(msg.bytes.as_slice()) {
                     Err(e) => {
@@ -132,10 +110,33 @@ pub fn clobber(settings: ClobberSettings, message: Message, close: Receiver<()>)
             }
 
             info!("{:?}", thread_metrics);
+
+            Ok(())
         }));
     }
 
     for handle in thread_handles {
-        handle.join().unwrap();
+        handle
+            .join()
+            .expect("Failed to join on child thread")
+            .expect("Child thread failed to return");
+    }
+
+    Ok(())
+}
+
+fn connect_and_configure(addr: SocketAddr) -> Result<TcpStream> {
+    let stream = TcpStream::connect(addr)?;
+
+    stream.set_nodelay(true)?;
+    stream.set_nonblocking(true)?;
+
+    Ok(stream)
+}
+
+fn close_requested(close: &Receiver<()>) -> bool {
+    match close.try_recv() {
+        Ok(_) | Err(TryRecvError::Disconnected) => true,
+        Err(TryRecvError::Empty) => false,
     }
 }

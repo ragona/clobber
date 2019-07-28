@@ -1,4 +1,6 @@
 #[allow(unused_imports)]
+pub mod client;
+
 use std::io::{stdin, Read};
 use std::net::Ipv4Addr;
 
@@ -6,12 +8,14 @@ use clap::{App, Arg, ArgMatches};
 use crossbeam_channel::Sender;
 use log::{info, LevelFilter};
 
-use crate::tcp_client::Message;
+use client::tcp_client::{self, Message};
 
-pub mod tcp_client;
+pub use failure::Error;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Copy, Clone)]
 pub struct ClobberSettings {
+    connections: u16,
     num_threads: u16,
     target: Ipv4Addr,
     port: u16,
@@ -19,7 +23,7 @@ pub struct ClobberSettings {
     // todo: Add duration of run
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> Result<()> {
     let cli = cli();
     let matches = cli.get_matches();
 
@@ -40,7 +44,7 @@ fn main() -> std::io::Result<()> {
         shutdown(sender, settings);
     });
 
-    tcp_client::clobber(settings, build_message(settings), receiver);
+    tcp_client::clobber(settings, build_message(settings), receiver)?;
 
     Ok(())
 }
@@ -71,11 +75,18 @@ impl ClobberSettings {
             .parse::<u16>()
             .expect("Failed to parse number of threads");
 
+        let connections = matches
+            .value_of("connections")
+            .unwrap_or("10")
+            .parse::<u16>()
+            .expect("Failed to parse connections");
+
         ClobberSettings {
             target,
             port,
             rate,
             num_threads,
+            connections,
         }
     }
 }
@@ -122,7 +133,7 @@ fn cli() -> App<'static, 'static> {
         )
 }
 
-fn setup_logger(log_level: LevelFilter) -> Result<(), fern::InitError> {
+fn setup_logger(log_level: LevelFilter) -> Result<()> {
     fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
@@ -137,6 +148,7 @@ fn setup_logger(log_level: LevelFilter) -> Result<(), fern::InitError> {
         .chain(std::io::stdout())
         .chain(fern::log_file("clobber.log")?)
         .apply()?;
+
     Ok(())
 }
 
