@@ -4,7 +4,7 @@ use std::net::Ipv4Addr;
 
 use clap::{App, Arg, ArgMatches};
 use crossbeam_channel::Sender;
-use log::info;
+use log::{info, LevelFilter};
 
 use crate::tcp_client::Message;
 
@@ -21,9 +21,16 @@ pub struct ClobberSettings {
 
 fn main() -> std::io::Result<()> {
     let cli = cli();
-    let settings = ClobberSettings::new(cli.get_matches());
+    let matches = cli.get_matches();
 
-    setup_logger().expect("Failed to setup logger");
+    match matches.occurrences_of("v") {
+        1 => setup_logger(log::LevelFilter::Info).expect("Failed to setup logger"),
+        2 => setup_logger(log::LevelFilter::Debug).expect("Failed to setup logger"),
+        3 => setup_logger(log::LevelFilter::Trace).expect("Failed to setup logger"),
+        _ => setup_logger(log::LevelFilter::Warn).expect("Failed to setup logger"),
+    }
+
+    let settings = ClobberSettings::new(matches);
 
     // this channel is for closing child threads
     let (sender, receiver) = crossbeam_channel::unbounded();
@@ -107,9 +114,15 @@ fn cli() -> App<'static, 'static> {
                 .help("Number of threads")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("v")
+                .short("v")
+                .multiple(true)
+                .help("Sets the level of verbosity"),
+        )
 }
 
-fn setup_logger() -> Result<(), fern::InitError> {
+fn setup_logger(log_level: LevelFilter) -> Result<(), fern::InitError> {
     fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
@@ -120,7 +133,7 @@ fn setup_logger() -> Result<(), fern::InitError> {
                 message
             ))
         })
-        .level(log::LevelFilter::Debug)
+        .level(log_level)
         .chain(std::io::stdout())
         .chain(fern::log_file("clobber.log")?)
         .apply()?;
