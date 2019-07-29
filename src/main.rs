@@ -4,15 +4,14 @@ pub mod client;
 use std::net::Ipv4Addr;
 
 use clap::{App, Arg, ArgMatches};
-use crossbeam_channel::Sender;
-use failure::Error;
-use log::info;
-use std::thread;
-
 use client::tcp_client::{self, ClientSettings, Message};
-use failure::_core::time::Duration;
+use crossbeam_channel::Sender;
+use log::{info, LevelFilter};
 use std::io::{stdin, Read};
+use std::thread;
+use std::time::Duration;
 
+pub use failure::{err_msg, Error};
 pub type Result<T> = std::result::Result<T, Error>;
 
 fn main() -> Result<()> {
@@ -25,10 +24,17 @@ fn main() -> Result<()> {
         None => Message::default(),
     };
 
-    // logging verbosity is based on argmatches
-    setup_logger(&matches)?;
+    let log_level = match &matches.occurrences_of("v") {
+        1 => log::LevelFilter::Info,
+        2 => log::LevelFilter::Debug,
+        3 => log::LevelFilter::Trace,
+        _ => log::LevelFilter::Warn,
+    };
+
+    setup_logger(log_level)?;
 
     // this channel is for closing child threads
+    // todo: restore this functionality
     let (sender, close) = crossbeam_channel::unbounded();
 
     // catch interrupt and gracefully shut down child threads
@@ -36,7 +42,7 @@ fn main() -> Result<()> {
         shutdown(sender, settings.num_threads);
     });
 
-    tcp_client::clobber(settings, message, close)?;
+    // todo: Add back a call to kick off tcp client
 
     Ok(())
 }
@@ -123,14 +129,7 @@ fn settings_from_argmatches(matches: &ArgMatches) -> ClientSettings {
     }
 }
 
-fn setup_logger(matches: &ArgMatches) -> Result<()> {
-    let log_level = match &matches.occurrences_of("v") {
-        1 => log::LevelFilter::Info,
-        2 => log::LevelFilter::Debug,
-        3 => log::LevelFilter::Trace,
-        _ => log::LevelFilter::Warn,
-    };
-
+pub fn setup_logger(log_level: LevelFilter) -> Result<()> {
     fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
