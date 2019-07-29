@@ -1,94 +1,44 @@
 #[allow(unused_imports)]
 pub mod client;
 
-use std::io::{stdin, Read};
 use std::net::Ipv4Addr;
 
 use clap::{App, Arg, ArgMatches};
 use crossbeam_channel::Sender;
-use log::{info, LevelFilter};
+use failure::Error;
+use log::info;
+use std::thread;
 
-use client::tcp_client::{self, Message};
+use client::tcp_client::{self, ClientSettings, Message};
+use failure::_core::time::Duration;
+use std::io::{stdin, Read};
 
-pub use failure::Error;
 pub type Result<T> = std::result::Result<T, Error>;
-
-#[derive(Debug, Copy, Clone)]
-pub struct ClobberSettings {
-    connections: u16,
-    num_threads: u16,
-    target: Ipv4Addr,
-    port: u16,
-    rate: u64,
-    // todo: Add duration of run
-}
 
 fn main() -> Result<()> {
     let cli = cli();
     let matches = cli.get_matches();
+    let settings = settings_from_argmatches(&matches);
 
-    match matches.occurrences_of("v") {
-        1 => setup_logger(log::LevelFilter::Info).expect("Failed to setup logger"),
-        2 => setup_logger(log::LevelFilter::Debug).expect("Failed to setup logger"),
-        3 => setup_logger(log::LevelFilter::Trace).expect("Failed to setup logger"),
-        _ => setup_logger(log::LevelFilter::Warn).expect("Failed to setup logger"),
-    }
+    let message = match optional_stdin() {
+        Some(bytes) => Message { bytes },
+        None => Message::default(),
+    };
 
-    let settings = ClobberSettings::new(matches);
+    // logging verbosity is based on argmatches
+    setup_logger(&matches)?;
 
     // this channel is for closing child threads
-    let (sender, receiver) = crossbeam_channel::unbounded();
+    let (sender, close) = crossbeam_channel::unbounded();
 
     // catch interrupt and gracefully shut down child threads
     std::thread::spawn(move || {
-        shutdown(sender, settings);
+        shutdown(sender, settings.num_threads);
     });
 
-    tcp_client::clobber(settings, build_message(settings), receiver)?;
+    tcp_client::clobber(settings, message, close)?;
 
     Ok(())
-}
-
-impl ClobberSettings {
-    pub fn new(matches: ArgMatches) -> ClobberSettings {
-        let target = matches
-            .value_of("target")
-            .expect("Failed to parse target")
-            .parse::<Ipv4Addr>()
-            .expect("Failed to parse target");
-
-        let port = matches
-            .value_of("port")
-            .unwrap_or("80")
-            .parse::<u16>()
-            .expect("Failed to parse port");
-
-        let rate = matches
-            .value_of("rate")
-            .unwrap_or("0")
-            .parse::<u64>()
-            .expect("Failed to parse rate");
-
-        let num_threads = matches
-            .value_of("threads")
-            .unwrap_or("4")
-            .parse::<u16>()
-            .expect("Failed to parse number of threads");
-
-        let connections = matches
-            .value_of("connections")
-            .unwrap_or("10")
-            .parse::<u16>()
-            .expect("Failed to parse connections");
-
-        ClobberSettings {
-            target,
-            port,
-            rate,
-            num_threads,
-            connections,
-        }
-    }
 }
 
 fn cli() -> App<'static, 'static> {
@@ -133,7 +83,54 @@ fn cli() -> App<'static, 'static> {
         )
 }
 
-fn setup_logger(log_level: LevelFilter) -> Result<()> {
+fn settings_from_argmatches(matches: &ArgMatches) -> ClientSettings {
+    let target = matches
+        .value_of("target")
+        .expect("Failed to parse target")
+        .parse::<Ipv4Addr>()
+        .expect("Failed to parse target");
+
+    let port = matches
+        .value_of("port")
+        .unwrap_or("80")
+        .parse::<u16>()
+        .expect("Failed to parse port");
+
+    let rate = matches
+        .value_of("rate")
+        .unwrap_or("0")
+        .parse::<u64>()
+        .expect("Failed to parse rate");
+
+    let num_threads = matches
+        .value_of("threads")
+        .unwrap_or("4")
+        .parse::<u16>()
+        .expect("Failed to parse number of threads");
+
+    let connections = matches
+        .value_of("connections")
+        .unwrap_or("10")
+        .parse::<u16>()
+        .expect("Failed to parse connections");
+
+    ClientSettings {
+        target,
+        port,
+        rate,
+        num_threads,
+        connections,
+    }
+}
+
+fn setup_logger(matches: &ArgMatches) -> Result<()> {
+    let log_level = match &matches.occurrences_of("v") {
+        1 => log::LevelFilter::Info,
+        2 => log::LevelFilter::Debug,
+        3 => log::LevelFilter::Trace,
+        _ => log::LevelFilter::Warn,
+    };
+
     fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
@@ -152,26 +149,36 @@ fn setup_logger(log_level: LevelFilter) -> Result<()> {
     Ok(())
 }
 
-fn build_message(_settings: ClobberSettings) -> Message {
-    let mut lines: Vec<u8> = vec![];
-    match stdin().read_to_end(&mut lines) {
-        Ok(_) => {}
-        Err(_) => {
-            lines.append(&mut b"GET /".to_vec());
-        }
-    }
-
-    Message::new(lines)
-}
-
-fn shutdown(closer: Sender<()>, settings: ClobberSettings) {
+fn shutdown(closer: Sender<()>, num_threads: u16) {
     ctrlc::set_handler(move || {
         info!("Shutting down");
-        for _ in 0..settings.num_threads {
+        for _ in 0..num_threads {
             closer
                 .send(())
                 .expect("Failed to send close message to child thread");
         }
     })
     .expect("Failed to set ctrlc handler");
+}
+
+fn optional_stdin() -> Option<Vec<u8>> {
+    let (sender, receiver) = crossbeam_channel::unbounded();
+
+    thread::spawn(move || {
+        let sin = stdin();
+        let mut bytes = vec![];
+
+        sin.lock()
+            .read_to_end(&mut bytes)
+            .expect("Failed to read from stdin");
+
+        sender.send(bytes).expect("Failed to send input");
+    });
+
+    thread::sleep(Duration::from_millis(1));
+
+    match receiver.try_recv() {
+        Ok(l) => Some(l),
+        _ => None,
+    }
 }

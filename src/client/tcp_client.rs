@@ -1,40 +1,49 @@
 use std::io::prelude::*;
-use std::net::{SocketAddr, SocketAddrV4, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, TryRecvError};
 use log::{debug, error, info, trace, warn};
 
-use crate::{ClobberSettings, Error, Result};
+use crate::{Error, Result};
+use std::io::stdin;
 use std::thread::JoinHandle;
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    bytes: Vec<u8>,
+    pub bytes: Vec<u8>,
 }
 
 impl Message {
-    pub fn new(bytes: Vec<u8>) -> Message {
-        Message { bytes }
+    pub fn new() -> Message {
+        Message { bytes: vec![] }
     }
-}
 
-#[derive(Copy, Clone, Debug)]
-pub struct Metrics {
-    requests: u64,
-    connects: u64,
-    reconnects: u64,
-}
-
-impl Metrics {
-    pub fn new() -> Metrics {
-        Metrics {
-            requests: 0,
-            connects: 0,
-            reconnects: 0,
+    pub fn default() -> Message {
+        Message {
+            bytes: b"GET / HTTP/1.1\r\n".to_vec(),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct Client {
+    settings: ClientSettings,
+    message: Message,
+    close: Receiver<()>,
+}
+
+impl Client {}
+
+#[derive(Debug, Copy, Clone)]
+pub struct ClientSettings {
+    pub connections: u16,
+    pub num_threads: u16,
+    pub target: Ipv4Addr,
+    pub port: u16,
+    pub rate: u64,
+    // todo: Add duration of run
 }
 
 /**
@@ -50,7 +59,7 @@ up with more than its fair share of poor connections, we'll see if that's necess
 
 **/
 
-pub fn clobber(settings: ClobberSettings, message: Message, close: Receiver<()>) -> Result<()> {
+pub fn clobber(settings: ClientSettings, message: Message, close: Receiver<()>) -> Result<()> {
     let addr: SocketAddr = SocketAddrV4::new(settings.target, settings.port).into();
     let mut thread_handles: Vec<JoinHandle<Result<()>>> = vec![];
 
@@ -82,7 +91,7 @@ fn sub_clobber(
     addr: SocketAddr,
     message: Message,
     close: Receiver<()>,
-    settings: ClobberSettings,
+    settings: ClientSettings,
 ) -> Result<()> {
     let mut stream = connect_and_configure(addr)?;
     let mut read_buf = [0u8; 65535];
