@@ -1,5 +1,5 @@
-use std::io::prelude::*;
-use std::io::stdin;
+use std::future::Future;
+use std::io::{self, prelude::*, stdin};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream, ToSocketAddrs};
 use std::thread;
 use std::thread::JoinHandle;
@@ -9,7 +9,9 @@ use crossbeam_channel::{Receiver, TryRecvError};
 use log::{debug, error, info, trace, warn};
 
 use crate::{err_msg, Error, Result};
+use failure::_core::pin::Pin;
 use failure::_core::result::Result::Err;
+use failure::_core::task::{Context, Poll};
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -35,7 +37,13 @@ pub struct Client {
     close: Receiver<()>,
 }
 
-impl Client {}
+/// Take three: Get rid of all the faux async shit in Connection, move it to good old fashioned
+/// sync code inside a client clobber function. Give the memory a nice clean place to live, etc.
+/// I think the pieces to keep are the Poll results; those are conceptually what we're looking
+/// for.  
+impl Client {
+    //    pub fn clobber
+}
 
 #[derive(Debug, Copy, Clone)]
 pub struct ClientSettings {
@@ -47,17 +55,25 @@ pub struct ClientSettings {
     // todo: Add duration of run
 }
 
+pub enum PollResult {
+    Read(usize),
+    Write(usize),
+}
+
 pub struct Connection {
     message: Message,
     stream: TcpStream,
+    read_buffer: Vec<u8>,
     current_request: Request,
 }
 
 impl Connection {
-    pub fn connect(addr: &SocketAddr, message: &Message) -> Result<Connection> {
+    // todo: Mixing result types within a single module is confusing
+    pub fn connect(addr: &SocketAddr, message: &Message) -> io::Result<Connection> {
         let addr = addr.clone();
         let message = message.clone();
         let current_request = Request::new();
+        let read_buffer = Vec::with_capacity(1024);
         let stream = TcpStream::connect(addr)?; // todo: Exponential backoff
 
         stream.set_nodelay(true)?;
@@ -66,44 +82,57 @@ impl Connection {
         Ok(Connection {
             message,
             stream,
+            read_buffer,
             current_request,
         })
     }
 
-    pub fn poll(&mut self) -> Result<()> {
-        // Each connection is a worker, so it should have a queue of its own.
-        // I guess it has some max number it works on at once? No, only one at once?
-        // Yeah, only one at once per connection or we start getting out of order responses.
-        // So... each thread loops through all of its connections and polls them. Each
-        // connection then polls its active request. If the active request is complete, it
-        // pops from its work queue and starts working on the new request.
+    fn poll(self: &mut Self) -> Poll<io::Result<()>> {
         if self.current_request.is_done() {
             self.current_request = Request::new();
         }
 
         if !self.current_request.write_done {
-            match self
-                .current_request
-                .write(&mut self.stream, &mut self.message.bytes)
-            {
-                Ok(_) => return Ok(()),
-                Err(_) => {} // todo: Not sure how to handle this err
+            return match self.write(&mut self.stream, &mut self.message.bytes) {
+                Poll::Ready(_) => {
+                    self.current_request.write_done = true;
+                    Poll::Pending
+                }
+                Poll::Pending => Poll::Pending,
             };
         } else if !self.current_request.read_done {
-            match self.current_request.read(&mut self.stream) {
-                Ok(_) => {}
-                Err(_) => {}
-            }
-        }
+            return match self.read(&mut self.stream, &mut self.read_buffer) {
+                Poll::Ready(_) => {
+                    self.current_request.read_done = true;
+                    Poll::Ready(Ok(()))
+                }
+                Poll::Pending => Poll::Pending,
+            };
+        };
 
-        Ok(())
+        unreachable!()
+    }
+
+    pub fn write(&mut self, stream: &mut TcpStream, buf: &mut [u8]) -> Poll<io::Result<()>> {
+        match stream.write_all(buf) {
+            Ok(_) => Poll::Ready(Ok(())),
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => Poll::Pending,
+            Err(e) => Poll::Ready(Err(e)),
+        }
+    }
+
+    pub fn read(&mut self, stream: &mut TcpStream, buf: &mut [u8]) -> Poll<io::Result<()>> {
+        match stream.read(buf) {
+            Ok(_) => Poll::Ready(Ok(())),
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => Poll::Pending,
+            Err(e) => Poll::Ready(Err(e)),
+        }
     }
 }
 
 pub struct Request {
     write_done: bool,
     read_done: bool,
-    buf: [u8; 1024],
 }
 
 impl Request {
@@ -111,46 +140,11 @@ impl Request {
         Request {
             write_done: false,
             read_done: false,
-            buf: [0; 1024],
         }
     }
 
     pub fn is_done(&self) -> bool {
         self.read_done && self.write_done
-    }
-
-    // todo: Would this be faster without using failure types here? Maybe it just can't fail?
-    pub fn write(&mut self, stream: &mut TcpStream, buf: &mut [u8]) -> Result<()> {
-        // I'm assuming that stream will be set to nonblocking, and all I'm trying to
-        // signal here is that Ok or WouldBlock are fine (and instant) responses, and
-        // I'm not sure what panics I'll see. todo: Fix
-        match stream.write_all(buf) {
-            Ok(_) => {
-                info!("write done {}", buf.len());
-                self.write_done = true;
-                Ok(())
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                info!("blocked write");
-                return Err(err_msg("blocked"));
-            }
-            Err(e) => panic!("Unhandled write error: {}", e),
-        }
-    }
-
-    pub fn read(&mut self, stream: &mut TcpStream) -> Result<()> {
-        match stream.read(&mut self.buf) {
-            Ok(_) => {
-                info!("read done");
-                self.read_done = true;
-                Ok(())
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                info!("blocked read");
-                return Err(err_msg("blocked"));
-            }
-            Err(e) => panic!("encountered IO error: {}", e),
-        }
     }
 }
 
@@ -204,11 +198,10 @@ mod tests {
 
     fn handle_client(stream: &mut TcpStream) {
         info!("handling client");
-        let mut bytes = vec![];
-        let n = stream.read_to_end(&mut bytes).expect("Failed to read");
-        info!("read {} bytes", n);
         let n = stream.write(b"hello").expect("Failed to write");
         info!("wrote {} bytes", n);
+        //        let n = stream.read_to_end(&mut bytes).expect("Failed to read");
+        //        info!("read {} bytes", n);
     }
 
     fn test_addr() -> SocketAddr {
@@ -243,12 +236,11 @@ mod tests {
     fn test_read() -> Result<()> {
         start_fake_server()?;
 
-        let mut connection = Connection::connect(&test_addr(), &Message::default())?;
+        let mut client = Connection::connect(&test_addr(), &Message::default())?;
 
-        for _ in 0..10 {
-            connection.poll()?;
-            thread::sleep(Duration::from_millis(5));
-        }
+        client.poll()?; // write
+        client.poll()?; // blocked read
+        client.poll()?; // read
 
         // todo: This is not working as intended; read is getting indefinitely blocked
 
