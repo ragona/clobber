@@ -1,10 +1,12 @@
+#![feature(async_await)]
+
 #[allow(unused_imports)]
 pub mod client;
 
 use std::net::Ipv4Addr;
 
 use clap::{App, Arg, ArgMatches};
-use client::tcp_client::{self, ClientSettings, Message};
+use client::tcp_client::{self, ClientSettings};
 use crossbeam_channel::Sender;
 use log::{info, LevelFilter};
 use std::io::{stdin, Read};
@@ -19,10 +21,10 @@ fn main() -> Result<()> {
     let matches = cli.get_matches();
     let settings = settings_from_argmatches(&matches);
 
-    let message = match optional_stdin() {
-        Some(bytes) => Message { bytes },
-        None => Message::default(),
-    };
+    //    let message = match optional_stdin() {
+    //        Some(bytes) => Message { bytes },
+    //        None => Message::default(),
+    //    };
 
     let log_level = match &matches.occurrences_of("v") {
         1 => log::LevelFilter::Info,
