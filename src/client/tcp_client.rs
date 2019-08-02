@@ -1,10 +1,11 @@
 use std::net::{Ipv4Addr, SocketAddr};
+use std::str;
 use std::thread;
 use std::time::Duration;
 
-use futures::executor;
 use futures::io::{self, AllowStdIo, AsyncReadExt, AsyncWriteExt, ErrorKind};
-use futures_timer::TryFutureExt;
+use futures::{executor, FutureExt, StreamExt};
+use futures_timer::{Delay, TryFutureExt};
 use juliex;
 use log::{info, LevelFilter};
 use romio::TcpStream;
@@ -34,27 +35,27 @@ impl ClientSettings {
         SocketAddr::new(self.target.into(), self.port)
     }
 }
-
-pub fn clobber(settings: ClientSettings) -> std::io::Result<()> {
-    let delay = 1e9 as u64 / settings.rate;
-    let connections: Vec<TcpStream> = vec![];
-
-    //    executor::block_on(async {
-    //        for _ in 0..settings.connections {
-    //            let mut stream = connect(&settings).await.unwrap();
-    //
-    //            loop {
-    //                juliex::spawn(async move {
-    //                    &stream.write_all(&REQUEST).await.unwrap();
-    //
-    //                    Ok(());
-    //                });
-    //            }
-    //        }
-    //    });
-
-    Ok(())
-}
+//
+//pub fn clobber(settings: ClientSettings) -> std::io::Result<()> {
+//    let delay = 1e9 as u64 / settings.rate;
+//    let connections: Vec<TcpStream> = vec![];
+//
+//        executor::block_on(async {
+//            for _ in 0..settings.connections {
+//                let mut stream = connect(&settings).await.unwrap();
+//
+//                loop {
+//                    juliex::spawn(async move {
+//                        &stream.write_all(&REQUEST).await.unwrap();
+//
+//                        Ok(());
+//                    });
+//                }
+//            }
+//        });
+//
+//    Ok(())
+//}
 
 /// Todo list:
 /// - Figure ownership issues to forcibly drop the test server so the socket closes.
@@ -63,29 +64,28 @@ pub fn clobber(settings: ClientSettings) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use crate::setup_logger;
-    use futures::StreamExt;
     use std::io::Result;
     use std::net::{SocketAddr, SocketAddrV4};
 
+    /// Echo server for unit testing
     fn setup_test_server() -> SocketAddr {
-        let addr = "127.0.0.1:8000".parse().unwrap();
-        let response = b"ok";
-        let mut server = romio::TcpListener::bind(&addr).unwrap();
+        let mut server = romio::TcpListener::bind(&"127.0.0.1:0".parse().unwrap()).unwrap();
+        let addr = server.local_addr().unwrap();
 
         thread::spawn(move || {
             let mut incoming = server.incoming();
 
             executor::block_on(async {
-                match incoming.next().await {
-                    Some(stream) => {
-                        match stream {
-                            Ok(mut stream) => {
-                                stream.write_all(response).await.unwrap();
-                            }
-                            Err(_) => { /* connection failed */ }
+                while let Some(stream) = incoming.next().await {
+                    match stream {
+                        Ok(mut stream) => {
+                            juliex::spawn(async move {
+                                let (mut reader, mut writer) = stream.split();
+                                reader.copy_into(&mut writer).await.unwrap();
+                            });
                         }
+                        Err(_) => { /* connection failed */ }
                     }
-                    None => {}
                 }
             })
         });
@@ -120,7 +120,7 @@ mod tests {
         let addr = setup_test_server();
         let result = executor::block_on(async {
             TcpStream::connect(&addr)
-                .timeout(Duration::from_millis(100))
+                .timeout(Duration::from_nanos(1))
                 .await
         });
 
@@ -135,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn test_connect_then_write() -> std::io::Result<()> {
+    fn test_write() -> std::io::Result<()> {
         let addr = setup_test_server();
         let buffer = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n";
 
@@ -144,10 +144,42 @@ mod tests {
                 .timeout(Duration::from_millis(100))
                 .await?;
 
-            stream.write_all(buffer).await?;
+            stream.write_all(buffer).await
+        })?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_read() -> std::io::Result<()> {
+        let addr = setup_test_server();
+        let write_buffer = b"GET / HTTP/1.1\r\n\r\n";
+        let mut read_buffer = vec![];
+
+        executor::block_on(async {
+            let mut stream = TcpStream::connect(&addr)
+                .timeout(Duration::from_millis(100))
+                .await?;
+
+            stream.write_all(write_buffer).await.unwrap();
+
+            loop {
+                match stream
+                    .read_to_end(&mut read_buffer)
+                    .timeout(Duration::from_millis(100))
+                    .await
+                {
+                    Ok(n) => {}
+                    Err(_) => {
+                        break;
+                    }
+                };
+            }
 
             Ok::<_, io::Error>(())
         })?;
+
+        assert_eq!(&write_buffer, &read_buffer.as_slice());
 
         Ok(())
     }
