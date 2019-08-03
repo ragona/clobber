@@ -128,6 +128,8 @@ fn settings_from_argmatches(matches: &ArgMatches) -> ClientSettings {
         rate,
         num_threads,
         connections,
+        duration: None,
+        connect_timeout: 0,
     }
 }
 
