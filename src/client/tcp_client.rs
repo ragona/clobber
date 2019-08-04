@@ -12,16 +12,17 @@ use futures_timer::{Delay, TryFutureExt};
 use crossbeam_channel::{Receiver, RecvError, Sender, TryRecvError};
 use failure::_core::ops::Add;
 use juliex;
-use log::{error, info, LevelFilter};
+use log::{debug, error, info, warn, LevelFilter};
 use romio::TcpStream;
 use std::ops::Deref;
 
 use crate::Message;
+use std::convert::TryInto;
 use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
-    pub rate: u64,
+    pub rate: usize,
     pub port: u16,
     pub target: Ipv4Addr,
     pub duration: Option<Duration>,
@@ -50,10 +51,10 @@ impl Config {
 
 #[derive(Debug, Copy, Clone)]
 pub struct Stats {
-    bytes_read: u128,
-    bytes_written: u128,
-    connections: u64,
-    connection_attempts: u64,
+    bytes_read: usize,
+    bytes_written: usize,
+    connections: usize,
+    connection_attempts: usize,
     start_time: Instant,
     end_time: Instant,
 }
@@ -94,19 +95,131 @@ impl Add for Stats {
 
 // todo: oof this method got big
 pub fn clobber(
-    settings: Config,
+    config: Config,
     message: Message,
     close_receiver: Receiver<()>,
-    result_sender: Sender<Stats>,
-) -> std::io::Result<()> {
-    let mut final_stats = Stats::new();
-    let start = Instant::now();
-    let delay = Duration::from_nanos(1e9 as u64 / settings.rate);
-    let (stat_sender, stat_receiver) = crossbeam_channel::unbounded();
-    let address = Arc::new(settings.addr());
+) -> std::io::Result<Stats> {
     let message = Arc::new(message);
+    let address = Arc::new(config.addr());
+    let (stat_sender, stat_receiver) = crossbeam_channel::unbounded();
+    let (result_sender, result_receiver) = crossbeam_channel::unbounded();
 
+    track_stats(stat_receiver, result_sender);
+
+    executor::block_on(async move {
+        let start = Instant::now();
+        let delay = Duration::from_nanos((1e9 as usize / config.rate).try_into().unwrap());
+        let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
+        let read_timeout = Duration::from_millis(config.read_timeout as u64);
+
+        let past_duration = || match config.duration {
+            Some(duration) => Instant::now() > start + duration,
+            None => false,
+        };
+
+        let close_requested = || match close_receiver.try_recv() {
+            Ok(_) | Err(TryRecvError::Disconnected) => true,
+            _ => false,
+        };
+
+        loop {
+            if past_duration() | close_requested() {
+                break;
+            }
+
+            // perform necessary memory copies here
+            let sender = stat_sender.clone();
+            let addr = Arc::clone(&address);
+            let msg = Arc::clone(&message);
+
+            juliex::spawn(async move {
+                let mut stats = Stats::new();
+                stats.connection_attempts += 1;
+
+                match connect_with_timeout(&addr, connect_timeout).await {
+                    Ok(mut stream) => {
+                        stats.connections += 1;
+
+                        if let Ok(n) = write(&mut stream, &msg.body).await {
+                            stats.bytes_written += n;
+                        }
+
+                        if let Ok(n) = read_with_timeout(&mut stream, read_timeout).await {
+                            stats.bytes_read += n;
+                        };
+                    }
+                    Err(ref e) if e.kind() == ErrorKind::TimedOut => {
+                        info!("connection timeout");
+                    }
+                    Err(e) => {
+                        error!("{}", e);
+                    }
+                };
+                sender.send(stats).unwrap();
+            });
+
+            spin_sleep::sleep(delay);
+        }
+    });
+
+    let final_stats = result_receiver
+        .recv()
+        .expect("Failed to recieve final results");
+
+    Ok(final_stats)
+}
+
+async fn connect_with_timeout(addr: &SocketAddr, timeout: Duration) -> io::Result<TcpStream> {
+    match TcpStream::connect(&addr).timeout(timeout).await {
+        Ok(stream) => {
+            debug!("connected to {}", &addr);
+            Ok(stream)
+        }
+        Err(e) => {
+            error!("connect error: '{}'", e);
+            Err(e)
+        }
+    }
+}
+
+async fn write(stream: &mut TcpStream, buf: &[u8]) -> io::Result<usize> {
+    match stream.write_all(buf).await {
+        Ok(_) => {
+            let n = buf.len();
+            debug!("{} bytes written", n);
+            Ok(n)
+        }
+        Err(e) => {
+            error!("write error: '{}'", e);
+            Err(e)
+        }
+    }
+}
+
+async fn read_with_timeout(stream: &mut TcpStream, timeout: Duration) -> io::Result<usize> {
+    let mut read_buffer = vec![]; // todo: size?
+    match stream.read_to_end(&mut read_buffer).timeout(timeout).await {
+        Ok(_) => {
+            let n = read_buffer.len();
+            debug!("{} bytes read ", n);
+            Ok(n)
+        }
+        Err(ref e) if e.kind() == io::ErrorKind::TimedOut => {
+            warn!("timeout: {:?}", stream);
+            Err(io::Error::new(io::ErrorKind::TimedOut, "foo"))
+        }
+        Err(e) => {
+            error!("read error: '{}'", e);
+            Err(e)
+        }
+    }
+
+    // todo: Do something with the read_buffer?
+}
+
+fn track_stats(stat_receiver: Receiver<Stats>, result_sender: Sender<Stats>) {
     thread::spawn(move || {
+        let mut final_stats = Stats::new();
         loop {
             match stat_receiver.try_recv() {
                 Ok(stat) => {
@@ -121,82 +234,7 @@ pub fn clobber(
 
         result_sender.send(final_stats).unwrap();
     });
-
-    executor::block_on(async move {
-        loop {
-            match settings.duration {
-                Some(duration) => {
-                    if Instant::now() > start + duration {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-
-            match close_receiver.try_recv() {
-                Ok(_) | Err(TryRecvError::Disconnected) => {
-                    break;
-                }
-                _ => {}
-            }
-
-            // perform necessary memory copies here
-            // todo: scope down, revisit use of Arc
-            let sender = stat_sender.clone();
-            let addr = Arc::clone(&address);
-            let msg = Arc::clone(&message);
-
-            juliex::spawn(async move {
-                let mut stats = Stats::new();
-                stats.connection_attempts += 1;
-                match TcpStream::connect(&addr)
-                    .timeout(Duration::from_millis(settings.connect_timeout as u64))
-                    .await
-                {
-                    Ok(mut stream) => {
-                        stats.connections += 1;
-
-                        match stream.write_all(&msg.body).await {
-                            Ok(_) => {},
-                            Err(e) => {
-                                error!("{}", e);
-                            }
-                        }
-
-                        stats.bytes_written += Arc::deref(&msg).body.len() as u128;
-
-                        let mut read_buffer = vec![]; // todo: size?
-                        match stream
-                            .read_to_end(&mut read_buffer)
-                            .timeout(Duration::from_millis(100))
-                            .await
-                        {
-                            Ok(_) => {
-                                stats.bytes_read += read_buffer.len() as u128;
-                            }
-                            Err(_) => {}
-                        };
-                    }
-                    Err(ref e) if e.kind() == ErrorKind::TimedOut => {
-                        // continue
-                        info!("connection timeout");
-                    }
-                    Err(e) => {
-                        // continue
-                        error!("{}", e);
-                    }
-                };
-
-                sender.send(stats).unwrap();
-            });
-
-            spin_sleep::sleep(delay);
-        }
-    });
-
-    Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -240,29 +278,26 @@ mod tests {
         let buffer = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec();
         let message = Message::new(buffer);
         let (_close_sender, close_receiver) = crossbeam_channel::unbounded();
-        let (result_sender, result_receiver) = crossbeam_channel::unbounded();
 
         let target = match addr.ip() {
             IpAddr::V4(ip) => ip,
             IpAddr::V6(_) => unimplemented!("todo: support ipv6"),
         };
 
-        let settings = Config {
+        let config = Config {
             rate: 10,
             port: addr.port(),
             target,
             duration: Some(Duration::from_millis(1000)),
             num_threads: 1,
-            connect_timeout: 200,
-            read_timeout: 5000,
+            connect_timeout: 100,
+            read_timeout: 100,
         };
 
-        clobber(settings, message, close_receiver, result_sender)?;
-
-        let final_stats = result_receiver.recv().unwrap();
+        let final_stats = clobber(config, message, close_receiver)?;
 
         assert_eq!(final_stats.connection_attempts, final_stats.connections);
-        assert_eq!(settings.rate, final_stats.connections);
+        assert_eq!(config.rate, final_stats.connections);
 
         Ok(())
     }
@@ -280,12 +315,13 @@ mod tests {
 
         Ok(())
     }
+
     #[test]
     fn connect_timeout() -> std::io::Result<()> {
         let addr = setup_server();
         let result = executor::block_on(async {
             TcpStream::connect(&addr)
-                .timeout(Duration::from_nanos(1))
+                .timeout(Duration::from_nanos(1)) // todo: this only USUALLY works :(
                 .await
         });
 

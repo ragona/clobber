@@ -40,17 +40,13 @@ fn main() -> Result<()> {
     setup_logger(log_level)?;
 
     let (close_sender, close_receiver) = crossbeam_channel::unbounded();
-    let (result_sender, result_receiver) = crossbeam_channel::unbounded();
 
     // catch interrupt and gracefully shut down child threads
     std::thread::spawn(move || {
         shutdown(close_sender);
     });
 
-    tcp_client::clobber(settings, message, close_receiver, result_sender)?;
-
-    // read final results
-    let final_stats = result_receiver.recv().unwrap();
+    let final_stats = tcp_client::clobber(settings, message, close_receiver)?;
 
     info!("{:#?}", final_stats);
 
@@ -127,7 +123,7 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
     let rate = matches
         .value_of("rate")
         .unwrap_or("0")
-        .parse::<u64>()
+        .parse::<usize>()
         .expect("Failed to parse rate");
 
     let num_threads = matches
