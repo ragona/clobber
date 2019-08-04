@@ -23,13 +23,6 @@ fn main() -> Result<()> {
     let matches = cli.get_matches();
     let settings = settings_from_argmatches(&matches);
 
-    let bytes = match optional_stdin() {
-        Some(bytes) => bytes,
-        None => unimplemented!("no request body"), // todo: Load from file
-    };
-
-    let message = Message::new(bytes);
-
     let log_level = match &matches.occurrences_of("v") {
         1 => log::LevelFilter::Info,
         2 => log::LevelFilter::Debug,
@@ -39,6 +32,12 @@ fn main() -> Result<()> {
 
     setup_logger(log_level)?;
 
+    let bytes = match optional_stdin() {
+        Some(bytes) => bytes,
+        None => unimplemented!("no request body"), // todo: Load from file
+    };
+
+    let message = Message::new(bytes);
     let (close_sender, close_receiver) = crossbeam_channel::unbounded();
 
     // catch interrupt and gracefully shut down child threads

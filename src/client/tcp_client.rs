@@ -135,24 +135,16 @@ pub fn clobber(
                 let mut stats = Stats::new();
                 stats.connection_attempts += 1;
 
-                match connect_with_timeout(&addr, connect_timeout).await {
-                    Ok(mut stream) => {
-                        stats.connections += 1;
+                if let Ok(mut stream) = connect_with_timeout(&addr, connect_timeout).await {
+                    stats.connections += 1;
 
-                        if let Ok(n) = write(&mut stream, &msg.body).await {
-                            stats.bytes_written += n;
-                        }
+                    if let Ok(n) = write(&mut stream, &msg.body).await {
+                        stats.bytes_written += n;
+                    }
 
-                        if let Ok(n) = read_with_timeout(&mut stream, read_timeout).await {
-                            stats.bytes_read += n;
-                        };
-                    }
-                    Err(ref e) if e.kind() == ErrorKind::TimedOut => {
-                        info!("connection timeout");
-                    }
-                    Err(e) => {
-                        error!("{}", e);
-                    }
+                    if let Ok(n) = read_with_timeout(&mut stream, read_timeout).await {
+                        stats.bytes_read += n;
+                    };
                 };
                 sender.send(stats).unwrap();
             });
