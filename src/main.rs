@@ -13,7 +13,7 @@ use std::io::{stdin, Read};
 use std::thread;
 use std::time::Duration;
 
-use crate::client::tcp_client;
+use crate::client::{tcp_client, Message};
 pub use failure::{err_msg, Error};
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -23,10 +23,12 @@ fn main() -> Result<()> {
     let matches = cli.get_matches();
     let settings = settings_from_argmatches(&matches);
 
-    //    let message = match optional_stdin() {
-    //        Some(bytes) => Message { bytes },
-    //        None => Message::default(),
-    //    };
+    let bytes = match optional_stdin() {
+        Some(bytes) => bytes,
+        None => unimplemented!("no request body"), // todo: Load from file
+    };
+
+    let message = Message::new(bytes);
 
     let log_level = match &matches.occurrences_of("v") {
         1 => log::LevelFilter::Info,
@@ -42,10 +44,10 @@ fn main() -> Result<()> {
 
     // catch interrupt and gracefully shut down child threads
     std::thread::spawn(move || {
-        shutdown(close_sender, settings.num_threads);
+        shutdown(close_sender);
     });
 
-    tcp_client::clobber(settings, close_receiver, result_sender)?;
+    tcp_client::clobber(settings, message, close_receiver, result_sender)?;
 
     // read final results
     let final_stats = result_receiver.recv().unwrap();
@@ -151,7 +153,7 @@ pub fn setup_logger(log_level: LevelFilter) -> Result<()> {
     Ok(())
 }
 
-fn shutdown(closer: Sender<()>, num_threads: u16) {
+fn shutdown(closer: Sender<()>) {
     ctrlc::set_handler(move || {
         info!("Shutting down");
         match closer.send(()) {

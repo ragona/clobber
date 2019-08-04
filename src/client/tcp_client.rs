@@ -14,6 +14,10 @@ use failure::_core::ops::Add;
 use juliex;
 use log::{error, info, LevelFilter};
 use romio::TcpStream;
+use std::ops::Deref;
+
+use crate::Message;
+use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Settings {
@@ -89,15 +93,16 @@ impl Add for Stats {
 // todo: oof this method got big
 pub fn clobber(
     settings: Settings,
+    message: Message,
     close_receiver: Receiver<()>,
     result_sender: Sender<Stats>,
 ) -> std::io::Result<()> {
-    let buffer = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n"; // todo: stdin / file
     let mut final_stats = Stats::new();
-    let addr = settings.addr();
     let start = Instant::now();
     let delay = Duration::from_nanos(1e9 as u64 / settings.rate);
-    let (mut stat_sender, mut stat_receiver) = crossbeam_channel::unbounded();
+    let (stat_sender, stat_receiver) = crossbeam_channel::unbounded();
+    let address = Arc::new(settings.addr());
+    let message = Arc::new(message);
 
     thread::spawn(move || {
         loop {
@@ -135,10 +140,14 @@ pub fn clobber(
                 _ => {}
             }
 
-            let s = stat_sender.clone();
-            let mut stats = Stats::new();
+            // perform necessary memory copies here
+            // todo: scope down, revisit use of Arc
+            let sender = stat_sender.clone();
+            let addr = Arc::clone(&address);
+            let msg = Arc::clone(&message);
 
             juliex::spawn(async move {
+                let mut stats = Stats::new();
                 stats.connection_attempts += 1;
                 match TcpStream::connect(&addr)
                     .timeout(Duration::from_millis(settings.connect_timeout as u64))
@@ -147,14 +156,14 @@ pub fn clobber(
                     Ok(mut stream) => {
                         stats.connections += 1;
 
-                        match stream.write_all(buffer).await {
+                        match stream.write_all(&msg.body).await {
                             Ok(_) => {},
                             Err(e) => {
                                 error!("{}", e);
                             }
                         }
 
-                        stats.bytes_written += buffer.len() as u128;
+                        stats.bytes_written += Arc::deref(&msg).body.len() as u128;
 
                         let mut read_buffer = vec![]; // todo: size?
                         match stream
@@ -178,7 +187,7 @@ pub fn clobber(
                     }
                 };
 
-                s.send(stats).unwrap();
+                sender.send(stats).unwrap();
             });
 
             spin_sleep::sleep(delay);
@@ -188,12 +197,6 @@ pub fn clobber(
     Ok(())
 }
 
-fn close_requested(close: &Receiver<()>) -> bool {
-    match close.try_recv() {
-        Ok(_) | Err(TryRecvError::Disconnected) => true,
-        Err(TryRecvError::Empty) => false,
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -212,9 +215,9 @@ mod tests {
                 let mut incoming = server.incoming();
                 while let Some(stream) = incoming.next().await {
                     match stream {
-                        Ok(mut stream) => {
+                        Ok(stream) => {
                             juliex::spawn(async move {
-                                let (mut reader, mut writer) = stream.split();
+                                let (reader, mut writer) = stream.split();
                                 reader.copy_into(&mut writer).await.unwrap();
                             });
                         }
@@ -234,12 +237,14 @@ mod tests {
         setup_logger(LevelFilter::Info).unwrap();
 
         let addr = setup_server();
-        let (close_sender, close_receiver) = crossbeam_channel::unbounded();
-        let (stat_sender, stat_receiver) = crossbeam_channel::unbounded();
+        let buffer = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec();
+        let message = Message::new(buffer);
+        let (_close_sender, close_receiver) = crossbeam_channel::unbounded();
+        let (result_sender, result_receiver) = crossbeam_channel::unbounded();
 
         let target = match addr.ip() {
             IpAddr::V4(ip) => ip,
-            IpAddr::V6(_) => unimplemented!(),
+            IpAddr::V6(_) => unimplemented!("todo: support ipv6"),
         };
 
         let settings = Settings {
@@ -251,9 +256,9 @@ mod tests {
             connect_timeout: 200,
         };
 
-        clobber(settings, close_receiver, stat_sender)?;
+        clobber(settings, message, close_receiver, result_sender)?;
 
-        let final_stats = stat_receiver.recv().unwrap();
+        let final_stats = result_receiver.recv().unwrap();
 
         assert_eq!(final_stats.connection_attempts, final_stats.connections);
         assert_eq!(settings.rate, final_stats.connections);
@@ -330,7 +335,7 @@ mod tests {
                 Ok(_) => {}
                 Err(_) => {}
             };
-            dbg!(read_buffer.len());
+
             Ok::<_, io::Error>(())
         })?;
 
