@@ -20,7 +20,7 @@ use crate::Message;
 use std::sync::Arc;
 
 #[derive(Debug, Copy, Clone)]
-pub struct Settings {
+pub struct Config {
     pub rate: u64,
     pub port: u16,
     pub target: Ipv4Addr,
@@ -30,9 +30,9 @@ pub struct Settings {
     pub read_timeout: u32,
 }
 
-impl Settings {
-    pub fn new(target: Ipv4Addr, port: u16) -> Settings {
-        Settings {
+impl Config {
+    pub fn new(target: Ipv4Addr, port: u16) -> Config {
+        Config {
             port,
             target,
             rate: 1,
@@ -94,7 +94,7 @@ impl Add for Stats {
 
 // todo: oof this method got big
 pub fn clobber(
-    settings: Settings,
+    settings: Config,
     message: Message,
     close_receiver: Receiver<()>,
     result_sender: Sender<Stats>,
@@ -247,7 +247,7 @@ mod tests {
             IpAddr::V6(_) => unimplemented!("todo: support ipv6"),
         };
 
-        let settings = Settings {
+        let settings = Config {
             rate: 10,
             port: addr.port(),
             target,
