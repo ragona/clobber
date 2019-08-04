@@ -13,7 +13,9 @@ use std::io::{stdin, Read};
 use std::thread;
 use std::time::Duration;
 
+use crate::client::tcp_client;
 pub use failure::{err_msg, Error};
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 fn main() -> Result<()> {
@@ -35,16 +37,20 @@ fn main() -> Result<()> {
 
     setup_logger(log_level)?;
 
-    // this channel is for closing child threads
-    // todo: restore this functionality
-    let (sender, close) = crossbeam_channel::unbounded();
+    let (close_sender, close_receiver) = crossbeam_channel::unbounded();
+    let (result_sender, result_receiver) = crossbeam_channel::unbounded();
 
     // catch interrupt and gracefully shut down child threads
     std::thread::spawn(move || {
-        shutdown(sender, settings.num_threads);
+        shutdown(close_sender, settings.num_threads);
     });
 
-    // todo: Add back a call to kick off tcp client
+    tcp_client::clobber(settings, close_receiver, result_sender)?;
+
+    // read final results
+    let final_stats = result_receiver.recv().unwrap();
+
+    info!("{:#?}", final_stats);
 
     Ok(())
 }
@@ -122,7 +128,7 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Settings {
         rate,
         num_threads,
         duration: None,
-        connect_timeout: 0,
+        connect_timeout: 100,
     }
 }
 
@@ -148,10 +154,9 @@ pub fn setup_logger(log_level: LevelFilter) -> Result<()> {
 fn shutdown(closer: Sender<()>, num_threads: u16) {
     ctrlc::set_handler(move || {
         info!("Shutting down");
-        for _ in 0..num_threads {
-            closer
-                .send(())
-                .expect("Failed to send close message to child thread");
+        match closer.send(()) {
+            Ok(_) => {}
+            Err(_) => {}
         }
     })
     .expect("Failed to set ctrlc handler");

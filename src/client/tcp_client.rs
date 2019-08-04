@@ -100,7 +100,7 @@ pub fn clobber(
     let (mut stat_sender, mut stat_receiver) = crossbeam_channel::unbounded();
 
     thread::spawn(move || {
-        while !close_requested(&close_receiver) {
+        loop {
             match stat_receiver.try_recv() {
                 Ok(stat) => {
                     final_stats = final_stats + stat;
@@ -128,6 +128,13 @@ pub fn clobber(
                 _ => {}
             }
 
+            match close_receiver.try_recv() {
+                Ok(_) | Err(TryRecvError::Disconnected) => {
+                    break;
+                }
+                _ => {}
+            }
+
             let s = stat_sender.clone();
             let mut stats = Stats::new();
 
@@ -141,7 +148,7 @@ pub fn clobber(
                         stats.connections += 1;
 
                         match stream.write_all(buffer).await {
-                            Ok(_) => {}
+                            Ok(_) => {},
                             Err(e) => {
                                 error!("{}", e);
                             }
