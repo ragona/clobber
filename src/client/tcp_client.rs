@@ -9,11 +9,11 @@ use futures::task::SpawnExt;
 use futures::{executor, FutureExt, StreamExt};
 use futures_timer::{Delay, TryFutureExt};
 
+use crossbeam_channel::{Receiver, RecvError, Sender, TryRecvError};
+use failure::_core::ops::Add;
 use juliex;
 use log::{error, info, LevelFilter};
 use romio::TcpStream;
-use failure::_core::ops::Add;
-use crossbeam_channel::{RecvError, TryRecvError, Receiver, Sender};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Settings {
@@ -48,8 +48,14 @@ pub struct Stats {
     bytes_written: u128,
     connections: u64,
     connection_attempts: u64,
-    duration: Duration,
-    errors: u64,
+    start_time: Instant,
+    end_time: Instant,
+}
+
+impl Stats {
+    pub fn duration(self: &Self) -> Duration {
+        self.end_time - self.start_time
+    }
 }
 
 impl Stats {
@@ -59,8 +65,8 @@ impl Stats {
             bytes_written: 0,
             connections: 0,
             connection_attempts: 0,
-            duration: Default::default(),
-            errors: 0,
+            start_time: Instant::now(),
+            end_time: Instant::now(),
         }
     }
 }
@@ -74,22 +80,26 @@ impl Add for Stats {
             bytes_written: self.bytes_written + other.bytes_written,
             connections: self.connections + other.connections,
             connection_attempts: self.connection_attempts + other.connection_attempts,
-            duration: self.duration,
-            errors: self.errors + other.errors,
+            start_time: self.start_time,
+            end_time: other.end_time, // todo: Is this right?
         }
     }
 }
 
-pub fn clobber(settings: Settings, close_receiver: Receiver<()>, result_sender: Sender<Stats>) -> std::io::Result<()> {
+// todo: oof this method got big
+pub fn clobber(
+    settings: Settings,
+    close_receiver: Receiver<()>,
+    result_sender: Sender<Stats>,
+) -> std::io::Result<()> {
+    let buffer = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n"; // todo: stdin / file
+    let mut final_stats = Stats::new();
     let addr = settings.addr();
     let start = Instant::now();
     let delay = Duration::from_nanos(1e9 as u64 / settings.rate);
     let (mut stat_sender, mut stat_receiver) = crossbeam_channel::unbounded();
 
-
     thread::spawn(move || {
-        let mut final_stats = Stats::new();
-
         while !close_requested(&close_receiver) {
             match stat_receiver.try_recv() {
                 Ok(stat) => {
@@ -102,11 +112,10 @@ pub fn clobber(settings: Settings, close_receiver: Receiver<()>, result_sender: 
             }
         }
 
-        result_sender.send(final_stats);
+        result_sender.send(final_stats).unwrap();
     });
 
     executor::block_on(async move {
-
         loop {
             // todo catch ctrl c from channel, graceful stop
 
@@ -120,32 +129,49 @@ pub fn clobber(settings: Settings, close_receiver: Receiver<()>, result_sender: 
             }
 
             let s = stat_sender.clone();
-            let mut result = Stats::new();
+            let mut stats = Stats::new();
 
             juliex::spawn(async move {
-                result.connection_attempts += 1;
-
+                stats.connection_attempts += 1;
                 match TcpStream::connect(&addr)
                     .timeout(Duration::from_millis(settings.connect_timeout as u64))
                     .await
-                    {
-                        Ok(stream) => {
-                            result.connections += 1;
-                            // read, write
-                            info!("{:?}", stream);
-                        }
-                        Err(ref e) if e.kind() == ErrorKind::TimedOut => {
-                            // continue
-                            info!("timeout");
-                        }
-                        Err(e) => {
-                            result.errors += 1;
-                            // continue
-                            error!("{}", e);
-                        }
-                    };
+                {
+                    Ok(mut stream) => {
+                        stats.connections += 1;
 
-                s.send(result);
+                        match stream.write_all(buffer).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("{}", e);
+                            }
+                        }
+
+                        stats.bytes_written += buffer.len() as u128;
+
+                        let mut read_buffer = vec![]; // todo: size?
+                        match stream
+                            .read_to_end(&mut read_buffer)
+                            .timeout(Duration::from_millis(100))
+                            .await
+                        {
+                            Ok(_) => {
+                                stats.bytes_read += read_buffer.len() as u128;
+                            }
+                            Err(_) => {}
+                        };
+                    }
+                    Err(ref e) if e.kind() == ErrorKind::TimedOut => {
+                        // continue
+                        info!("timeout");
+                    }
+                    Err(e) => {
+                        // continue
+                        error!("{}", e);
+                    }
+                };
+
+                s.send(stats).unwrap();
             });
 
             spin_sleep::sleep(delay);
@@ -162,33 +188,12 @@ fn close_requested(close: &Receiver<()>) -> bool {
     }
 }
 
-fn listen_for_shutdown() {
-
-}
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::setup_logger;
     use std::io::Result;
     use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV4};
-
-    fn test_settings(addr: &SocketAddr) -> Settings {
-        let target = match addr.ip() {
-            IpAddr::V4(ip) => ip,
-            IpAddr::V6(_) => unimplemented!(),
-        };
-
-        Settings {
-            rate: 10,
-            port: addr.port(),
-            target,
-            duration: Some(Duration::from_millis(1000)),
-            num_threads: 1,
-            connect_timeout: 200,
-        }
-    }
 
     /// Echo server for unit testing
     fn setup_server() -> SocketAddr {
@@ -219,19 +224,32 @@ mod tests {
 
     #[test]
     fn slow_clobber() -> std::io::Result<()> {
-        setup_logger(LevelFilter::Info);
+        setup_logger(LevelFilter::Info).unwrap();
+
         let addr = setup_server();
-        let (close_sender, close_receiver ) = crossbeam_channel::unbounded();
+        let (close_sender, close_receiver) = crossbeam_channel::unbounded();
         let (stat_sender, stat_receiver) = crossbeam_channel::unbounded();
-        let mut settings = test_settings(&addr);
+
+        let target = match addr.ip() {
+            IpAddr::V4(ip) => ip,
+            IpAddr::V6(_) => unimplemented!(),
+        };
+
+        let settings = Settings {
+            rate: 10,
+            port: addr.port(),
+            target,
+            duration: Some(Duration::from_millis(1000)),
+            num_threads: 1,
+            connect_timeout: 200,
+        };
 
         clobber(settings, close_receiver, stat_sender)?;
-        dbg!("clobber done");
+
         let final_stats = stat_receiver.recv().unwrap();
 
-        dbg!(final_stats);
-
-        // todo: add some assertions
+        assert_eq!(final_stats.connection_attempts, final_stats.connections);
+        assert_eq!(settings.rate, final_stats.connections);
 
         Ok(())
     }
@@ -297,19 +315,15 @@ mod tests {
 
             stream.write_all(write_buffer).await.unwrap();
 
-            loop {
-                match stream
-                    .read_to_end(&mut read_buffer)
-                    .timeout(Duration::from_millis(100))
-                    .await
-                {
-                    Ok(n) => {}
-                    Err(_) => {
-                        break;
-                    }
-                };
-            }
-
+            match stream
+                .read_to_end(&mut read_buffer)
+                .timeout(Duration::from_millis(100))
+                .await
+            {
+                Ok(_) => {}
+                Err(_) => {}
+            };
+            dbg!(read_buffer.len());
             Ok::<_, io::Error>(())
         })?;
 

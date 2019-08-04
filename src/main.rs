@@ -6,7 +6,7 @@ pub mod client;
 use std::net::Ipv4Addr;
 
 use clap::{App, Arg, ArgMatches};
-use client::tcp_client::{self, Settings};
+use client::tcp_client::Settings;
 use crossbeam_channel::Sender;
 use log::{info, LevelFilter};
 use std::io::{stdin, Read};
@@ -115,12 +115,6 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Settings {
         .unwrap_or("4")
         .parse::<u16>()
         .expect("Failed to parse number of threads");
-
-    let connections = matches
-        .value_of("connections")
-        .unwrap_or("10")
-        .parse::<u16>()
-        .expect("Failed to parse connections");
 
     Settings {
         target,
