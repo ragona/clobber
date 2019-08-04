@@ -97,6 +97,18 @@ fn cli() -> App<'static, 'static> {
                 .multiple(true)
                 .help("Sets the level of verbosity"),
         )
+        .arg(
+            Arg::with_name("connect-timeout")
+                .long("connect-timeout")
+                .help("Timeout for initial TCP syn timeout")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("read-timeout")
+                .long("read-timeout")
+                .help("Timeout for reading data from target")
+                .takes_value(true),
+        )
 }
 
 fn settings_from_argmatches(matches: &ArgMatches) -> Settings {
@@ -124,13 +136,26 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Settings {
         .parse::<u16>()
         .expect("Failed to parse number of threads");
 
+    let connect_timeout = matches
+        .value_of("connect-timeout")
+        .unwrap_or("500")
+        .parse::<u32>()
+        .expect("Failed to parse connect-timeout");
+
+    let read_timeout = matches
+        .value_of("read-timeout")
+        .unwrap_or("500")
+        .parse::<u32>()
+        .expect("Failed to parse read-timeout");
+
     Settings {
         target,
         port,
         rate,
         num_threads,
-        duration: None,
-        connect_timeout: 100,
+        duration: None, // todo: add human-duration duration value
+        connect_timeout,
+        read_timeout,
     }
 }
 

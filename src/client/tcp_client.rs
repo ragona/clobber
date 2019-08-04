@@ -27,6 +27,7 @@ pub struct Settings {
     pub duration: Option<Duration>,
     pub num_threads: u16,
     pub connect_timeout: u32,
+    pub read_timeout: u32,
 }
 
 impl Settings {
@@ -38,6 +39,7 @@ impl Settings {
             duration: None,
             num_threads: 1,
             connect_timeout: 500,
+            read_timeout: 500,
         }
     }
 
@@ -122,8 +124,6 @@ pub fn clobber(
 
     executor::block_on(async move {
         loop {
-            // todo catch ctrl c from channel, graceful stop
-
             match settings.duration {
                 Some(duration) => {
                     if Instant::now() > start + duration {
@@ -179,7 +179,7 @@ pub fn clobber(
                     }
                     Err(ref e) if e.kind() == ErrorKind::TimedOut => {
                         // continue
-                        info!("timeout");
+                        info!("connection timeout");
                     }
                     Err(e) => {
                         // continue
@@ -254,6 +254,7 @@ mod tests {
             duration: Some(Duration::from_millis(1000)),
             num_threads: 1,
             connect_timeout: 200,
+            read_timeout: 5000,
         };
 
         clobber(settings, message, close_receiver, result_sender)?;
