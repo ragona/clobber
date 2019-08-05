@@ -1,9 +1,9 @@
+use std::convert::TryInto;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-use std::convert::TryInto;
-use std::sync::Arc;
 
 use futures::io::{self, AllowStdIo, AsyncReadExt, AsyncWriteExt, ErrorKind};
 use futures::prelude::*;
@@ -11,15 +11,13 @@ use futures::task::SpawnExt;
 use futures::{executor, FutureExt, StreamExt};
 use futures_timer::{Delay, TryFutureExt};
 
-use crossbeam_channel::{Receiver, RecvError, Sender, TryRecvError};
-use failure::_core::ops::Add;
-use juliex;
 use log::{debug, error, info, warn, LevelFilter};
 use romio::TcpStream;
 use std::ops::Deref;
 
-use crate::Message;
 use crate::client::stats::Stats;
+use crate::Message;
+use futures::executor::{ThreadPool, ThreadPoolBuilder};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -50,17 +48,19 @@ impl Config {
     }
 }
 
-pub fn clobber(
-    config: Config,
-    message: Message,
-    close_receiver: Receiver<()>,
-) -> std::io::Result<Stats> {
+pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
     let message = Arc::new(message);
     let address = Arc::new(config.addr());
-    let (stat_sender, stat_receiver) = crossbeam_channel::unbounded();
-    let (result_sender, result_receiver) = crossbeam_channel::unbounded();
+    let mut pools = vec![];
 
-    track_stats(stat_receiver, result_sender);
+    for _ in 0..config.num_threads {
+        let pool = ThreadPoolBuilder::new()
+            .pool_size(1)
+            .create()
+            .expect("failed to create thread pool");
+
+        pools.push(pool);
+    }
 
     executor::block_on(async move {
         let start = Instant::now();
@@ -73,48 +73,38 @@ pub fn clobber(
             None => false,
         };
 
-        let close_requested = || match close_receiver.try_recv() {
-            Ok(_) | Err(TryRecvError::Disconnected) => true,
-            _ => false,
-        };
-
         loop {
-            if past_duration() | close_requested() {
+            if past_duration() {
                 break;
             }
 
-            // perform necessary memory copies here
-            let sender = stat_sender.clone();
-            let addr = Arc::clone(&address);
-            let msg = Arc::clone(&message);
+            for mut pool in &pools {
+                let addr = Arc::clone(&address);
+                let msg = Arc::clone(&message);
 
-            juliex::spawn(async move {
-                let mut stats = Stats::new();
-                stats.connection_attempts += 1;
+                pool.spawn(async move {
+                    let mut stats = Stats::new();
+                    stats.connection_attempts += 1;
 
-                if let Ok(mut stream) = connect_with_timeout(&addr, connect_timeout).await {
-                    stats.connections += 1;
+                    if let Ok(mut stream) = connect_with_timeout(&addr, connect_timeout).await {
+                        stats.connections += 1;
 
-                    if let Ok(n) = write(&mut stream, &msg.body).await {
-                        stats.bytes_written += n;
-                    }
+                        if let Ok(n) = write(&mut stream, &msg.body).await {
+                            stats.bytes_written += n;
+                        }
 
-                    if let Ok(n) = read_with_timeout(&mut stream, read_timeout).await {
-                        stats.bytes_read += n;
+                        if let Ok(n) = read_with_timeout(&mut stream, read_timeout).await {
+                            stats.bytes_read += n;
+                        };
                     };
-                };
-                sender.send(stats).unwrap();
-            });
+                }).unwrap();
 
-            spin_sleep::sleep(delay);
+                spin_sleep::sleep(delay);
+            }
         }
     });
 
-    let final_stats = result_receiver
-        .recv()
-        .expect("Failed to recieve final results");
-
-    Ok(final_stats)
+    Ok(Stats::new())
 }
 
 async fn connect_with_timeout(addr: &SocketAddr, timeout: Duration) -> io::Result<TcpStream> {
@@ -165,29 +155,6 @@ async fn read_with_timeout(stream: &mut TcpStream, timeout: Duration) -> io::Res
     // todo: Do something with the read_buffer?
 }
 
-fn track_stats(stat_receiver: Receiver<Stats>, result_sender: Sender<Stats>) {
-    thread::spawn(move || {
-        let mut final_stats = Stats::new();
-        loop {
-            match stat_receiver.try_recv() {
-                Ok(stat) => {
-                    final_stats = final_stats + stat;
-                    continue;
-                }
-                Err(TryRecvError::Disconnected) => {
-                    break;
-                }
-                Err(TryRecvError::Empty) => {}
-            }
-
-            // todo: I imagine there's a race condition in here
-            thread::sleep(Duration::from_millis(100))
-        }
-
-        result_sender.send(final_stats).unwrap();
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,10 +195,10 @@ mod tests {
     fn slow_clobber() -> std::io::Result<()> {
         // setup_logger(LevelFilter::Debug).unwrap();
 
-        let addr = setup_server();
+//        let addr = setup_server();
+        let addr: SocketAddr = "127.0.0.1:7878".parse().unwrap();
         let buffer = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec();
         let message = Message::new(buffer);
-        let (_close_sender, close_receiver) = crossbeam_channel::unbounded();
 
         let target = match addr.ip() {
             IpAddr::V4(ip) => ip,
@@ -240,18 +207,19 @@ mod tests {
 
         let config = Config {
             target,
-            rate: 10,
+            rate: 1000,
             port: addr.port(),
             duration: Some(Duration::from_millis(1000)),
-            num_threads: 1,
+            num_threads: 4,
             connect_timeout: 100,
             read_timeout: 100,
         };
 
-        let final_stats = clobber(config, message, close_receiver)?;
+        let final_stats = clobber(config, message)?;
 
-        assert_eq!(final_stats.connection_attempts, final_stats.connections);
-        assert_eq!(config.rate, final_stats.connections);
+        //        assert_eq!(final_stats.connection_attempts, final_stats.connections);
+        //        assert_eq!(config.rate, final_stats.connections);
+        dbg!(final_stats);
 
         Ok(())
     }

@@ -5,16 +5,14 @@ pub mod client;
 
 use std::net::Ipv4Addr;
 
+use crate::client::{tcp_client, Message};
 use clap::{App, Arg, ArgMatches};
 use client::tcp_client::Config;
-use crossbeam_channel::Sender;
+pub use failure::{err_msg, Error};
 use log::{info, LevelFilter};
 use std::io::{stdin, Read};
 use std::thread;
 use std::time::Duration;
-
-use crate::client::{tcp_client, Message};
-pub use failure::{err_msg, Error};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -38,16 +36,13 @@ fn main() -> Result<()> {
     };
 
     let message = Message::new(bytes);
-    let (close_sender, close_receiver) = crossbeam_channel::unbounded();
 
     // catch interrupt and gracefully shut down child threads
-    std::thread::spawn(move || {
-        shutdown(close_sender);
-    });
+    //    std::thread::spawn(move || {
+    //        shutdown(close_sender);
+    //    });
 
-    let final_stats = tcp_client::clobber(settings, message, close_receiver)?;
-
-    info!("{:#?}", final_stats);
+    tcp_client::clobber(settings, message)?;
 
     Ok(())
 }
@@ -173,19 +168,12 @@ pub fn setup_logger(log_level: LevelFilter) -> Result<()> {
     Ok(())
 }
 
-fn shutdown(closer: Sender<()>) {
-    ctrlc::set_handler(move || {
-        info!("Shutting down");
-        match closer.send(()) {
-            Ok(_) => {}
-            Err(_) => {}
-        }
-    })
-    .expect("Failed to set ctrlc handler");
-}
-
+/// This is a bit of a weird way to do this, but I'm not sure what the better option is.
+/// What this bit of code does is that it spins off a thread to listen to stdin, and then
+/// sleeps for a moment to give that thread time to put something in the channel. It... works.
+/// Surely there is a more idiomatic option though. ‾\_(ツ)_/‾
 fn optional_stdin() -> Option<Vec<u8>> {
-    let (sender, receiver) = crossbeam_channel::unbounded();
+    let (sender, receiver) = std::sync::mpsc::channel();
 
     thread::spawn(move || {
         let sin = stdin();
