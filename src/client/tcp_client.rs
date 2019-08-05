@@ -51,58 +51,66 @@ impl Config {
 pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
     let message = Arc::new(message);
     let address = Arc::new(config.addr());
-    let mut pools = vec![];
+    let mut threads = vec![];
 
     for _ in 0..config.num_threads {
-        let pool = ThreadPoolBuilder::new()
-            .pool_size(1)
-            .create()
-            .expect("failed to create thread pool");
+        let addrr = Arc::clone(&address); // todo: fix 
+        let msgg = Arc::clone(&message);
 
-        pools.push(pool);
+        let thread = std::thread::spawn(move || {
+            let mut pool = ThreadPoolBuilder::new()
+                .pool_size(1)
+                .create()
+                .expect("failed to create thread pool");
+
+            executor::block_on(async move {
+                let start = Instant::now();
+                let delay = Duration::from_nanos((1e9 as usize / config.rate).try_into().unwrap());
+                let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
+                let read_timeout = Duration::from_millis(config.read_timeout as u64);
+
+                let past_duration = || match config.duration {
+                    Some(duration) => Instant::now() > start + duration,
+                    None => false,
+                };
+
+                loop {
+                    if past_duration() {
+                        break;
+                    }
+
+                    let addr = Arc::clone(&addrr);
+                    let msg = Arc::clone(&msgg);
+
+                    pool.spawn(async move {
+
+                        let mut stats = Stats::new();
+                        stats.connection_attempts += 1;
+
+                        if let Ok(mut stream) = connect_with_timeout(&addr, connect_timeout).await {
+                            stats.connections += 1;
+
+                            if let Ok(n) = write(&mut stream, &msg.body).await {
+                                stats.bytes_written += n;
+                            }
+
+                            if let Ok(n) = read_with_timeout(&mut stream, read_timeout).await {
+                                stats.bytes_read += n;
+                            };
+                        };
+                    }).unwrap();
+
+                    Delay::new(delay * config.num_threads as u32).map(|_| {}).await;
+                }
+            });
+        });
+
+        threads.push(thread);
     }
 
-    executor::block_on(async move {
-        let start = Instant::now();
-        let delay = Duration::from_nanos((1e9 as usize / config.rate).try_into().unwrap());
-        let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
-        let read_timeout = Duration::from_millis(config.read_timeout as u64);
-
-        let past_duration = || match config.duration {
-            Some(duration) => Instant::now() > start + duration,
-            None => false,
-        };
-
-        loop {
-            if past_duration() {
-                break;
-            }
-
-            for mut pool in &pools {
-                let addr = Arc::clone(&address);
-                let msg = Arc::clone(&message);
-
-                pool.spawn(async move {
-                    let mut stats = Stats::new();
-                    stats.connection_attempts += 1;
-
-                    if let Ok(mut stream) = connect_with_timeout(&addr, connect_timeout).await {
-                        stats.connections += 1;
-
-                        if let Ok(n) = write(&mut stream, &msg.body).await {
-                            stats.bytes_written += n;
-                        }
-
-                        if let Ok(n) = read_with_timeout(&mut stream, read_timeout).await {
-                            stats.bytes_read += n;
-                        };
-                    };
-                }).unwrap();
-
-                spin_sleep::sleep(delay);
-            }
-        }
-    });
+    for handle in threads {
+        handle.join();
+    }
 
     Ok(Stats::new())
 }
