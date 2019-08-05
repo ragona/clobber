@@ -1,3 +1,4 @@
+pub mod stats;
 pub mod tcp_client;
 
 pub struct Message {

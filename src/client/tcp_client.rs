@@ -2,6 +2,8 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::str;
 use std::thread;
 use std::time::{Duration, Instant};
+use std::convert::TryInto;
+use std::sync::Arc;
 
 use futures::io::{self, AllowStdIo, AsyncReadExt, AsyncWriteExt, ErrorKind};
 use futures::prelude::*;
@@ -17,8 +19,7 @@ use romio::TcpStream;
 use std::ops::Deref;
 
 use crate::Message;
-use std::convert::TryInto;
-use std::sync::Arc;
+use crate::client::stats::Stats;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -46,50 +47,6 @@ impl Config {
 
     pub fn addr(self: &Self) -> SocketAddr {
         SocketAddr::new(self.target.into(), self.port)
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct Stats {
-    bytes_read: usize,
-    bytes_written: usize,
-    connections: usize,
-    connection_attempts: usize,
-    start_time: Instant,
-    end_time: Instant,
-}
-
-impl Stats {
-    pub fn duration(self: &Self) -> Duration {
-        self.end_time - self.start_time
-    }
-}
-
-impl Stats {
-    pub fn new() -> Stats {
-        Stats {
-            bytes_read: 0,
-            bytes_written: 0,
-            connections: 0,
-            connection_attempts: 0,
-            start_time: Instant::now(),
-            end_time: Instant::now(),
-        }
-    }
-}
-
-impl Add for Stats {
-    type Output = Stats;
-
-    fn add(self: Stats, other: Stats) -> Stats {
-        Stats {
-            bytes_read: self.bytes_read + other.bytes_read,
-            bytes_written: self.bytes_written + other.bytes_written,
-            connections: self.connections + other.connections,
-            connection_attempts: self.connection_attempts + other.connection_attempts,
-            start_time: self.start_time,
-            end_time: other.end_time, // todo: Is this right?
-        }
     }
 }
 
@@ -215,12 +172,16 @@ fn track_stats(stat_receiver: Receiver<Stats>, result_sender: Sender<Stats>) {
             match stat_receiver.try_recv() {
                 Ok(stat) => {
                     final_stats = final_stats + stat;
+                    continue;
                 }
                 Err(TryRecvError::Disconnected) => {
                     break;
                 }
                 Err(TryRecvError::Empty) => {}
             }
+
+            // todo: I imagine there's a race condition in here
+            thread::sleep(Duration::from_millis(100))
         }
 
         result_sender.send(final_stats).unwrap();
