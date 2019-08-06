@@ -1,6 +1,7 @@
 pub mod stats;
 pub mod tcp_client;
 
+#[derive(Debug, Clone)]
 pub struct Message {
     pub body: Vec<u8>,
 }

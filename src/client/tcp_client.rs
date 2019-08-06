@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use futures::io::{self, AllowStdIo, AsyncReadExt, AsyncWriteExt, ErrorKind};
 use futures::prelude::*;
-use futures::task::SpawnExt;
+use futures::task::{SpawnExt, LocalSpawnExt};
 use futures::{executor, FutureExt, StreamExt};
 use futures_timer::{Delay, TryFutureExt};
 
@@ -17,7 +17,7 @@ use std::ops::Deref;
 
 use crate::client::stats::Stats;
 use crate::Message;
-use futures::executor::{ThreadPool, ThreadPoolBuilder};
+use futures::executor::{ThreadPool, ThreadPoolBuilder, LocalPool, LocalSpawner};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -49,67 +49,64 @@ impl Config {
 }
 
 pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
-    let message = Arc::new(message);
-    let address = Arc::new(config.addr());
+    info!("Starting: {:?}", config);
+
     let mut threads = vec![];
 
     for _ in 0..config.num_threads {
-        let addrr = Arc::clone(&address); // todo: fix 
-        let msgg = Arc::clone(&message);
+        let start = Instant::now();
+        let config = config.clone();
+        let message = message.clone();
+        let tick_delay = Duration::from_nanos((1e9 as usize / config.rate).try_into().unwrap()) * config.num_threads as u32;
+        let read_timeout = Duration::from_millis(config.read_timeout as u64);
+        let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
+
+        let past_duration = || match config.duration {
+            Some(duration) => Instant::now() > start + duration,
+            None => false,
+        };
 
         let thread = std::thread::spawn(move || {
-            let mut pool = ThreadPoolBuilder::new()
-                .pool_size(1)
-                .create()
-                .expect("failed to create thread pool");
+            let mut pool = LocalPool::new();
+            let mut spawner = pool.spawner();
+            let mut stats = Stats::new();
+            // seed with a couple requests?
+
+//            // eh?
+//            std::thread::spawn(move || {
+//                pool.run();
+//            });
 
             executor::block_on(async move {
-                let start = Instant::now();
-                let delay = Duration::from_nanos((1e9 as usize / config.rate).try_into().unwrap());
-                let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
-                let read_timeout = Duration::from_millis(config.read_timeout as u64);
-
-                let past_duration = || match config.duration {
-                    Some(duration) => Instant::now() > start + duration,
-                    None => false,
-                };
+                let addr = config.addr();
 
                 loop {
+                    &spawner.spawn_local(async {
+
+                        if let Ok(mut stream) = connect_with_timeout(&addr, Duration::from_millis(config.connect_timeout as u64)).await {
+
+                            if let Err(e) = write(&mut stream, &message.body).await {
+
+                            }
+
+                            if let Ok(n) = read_with_timeout(&mut stream, Duration::from_millis(config.read_timeout as u64)).await {
+                            };
+                        };
+                    });
+                    Delay::new(tick_delay).map(|_| {}).await;
                     if past_duration() {
                         break;
                     }
-
-                    let addr = Arc::clone(&addrr);
-                    let msg = Arc::clone(&msgg);
-
-                    pool.spawn(async move {
-
-                        let mut stats = Stats::new();
-                        stats.connection_attempts += 1;
-
-                        if let Ok(mut stream) = connect_with_timeout(&addr, connect_timeout).await {
-                            stats.connections += 1;
-
-                            if let Ok(n) = write(&mut stream, &msg.body).await {
-                                stats.bytes_written += n;
-                            }
-
-                            if let Ok(n) = read_with_timeout(&mut stream, read_timeout).await {
-                                stats.bytes_read += n;
-                            };
-                        };
-                    }).unwrap();
-
-                    Delay::new(delay * config.num_threads as u32).map(|_| {}).await;
                 }
             });
+
         });
 
         threads.push(thread);
-    }
+    };
 
     for handle in threads {
-        handle.join();
+        handle.join().unwrap();
     }
 
     Ok(Stats::new())
