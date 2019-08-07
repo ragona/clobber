@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use futures::executor::LocalPool;
 use futures::io::{self, AsyncReadExt};
 use futures::prelude::*;
-use futures::task::{LocalSpawnExt};
+use futures::task::LocalSpawnExt;
 use futures_timer::{Delay, TryFutureExt};
 
 use log::{debug, error, info, warn};
@@ -58,23 +58,36 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
 
     let mut threads = vec![];
 
+    // create one loop per connection, but make them wait their turn -- other threads
+    // should go first so that connections are woven across threads, not back to back:
+    // --------------------------------------------------
+    // thread 1:  a       e       a       e
+    // thread 2:    b       f       b       f
+    // thread 3:      c       g       c       g
+    // thread 4:        d       h       d       h
+    // --------------------------------------------------
+    // In this diagram the rows are threads, and letters are our async connections.
+    // Connections are not persistent, but are recursive, and will only loop and make
+    // another call once one is done. This puts a cap on our max connections at once,
+    // and by spreading out the requests like this we even out the load. We give each
+    // future as long as possible to complete without falling behind.
+
     for _ in 0..config.num_threads {
         // per-thread clones
         let config = config.clone();
         let message = message.clone();
         let addr = config.addr();
 
-        // start thread to handle N
+        // start thread which will contain a chunk of connections
         let thread = std::thread::spawn(move || {
             let mut pool = LocalPool::new();
             let mut spawner = pool.spawner();
 
+            // immediately create all connections, but don't let them start until it's their turn
             for i in 0..conns_per_thread {
-                // per-port clones
+                // per-connection clones
                 let message = message.clone();
 
-                // create one stream per connection, but make them wait their turn -- other threads
-                // should go first so that connections are woven across threads, not back to back.
                 spawner
                     .spawn_local(async move {
                         // stagger the start of each connection loop to spread out requests
@@ -84,8 +97,6 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
 
                         // connect, write, read loop
                         loop {
-                            // todo: handle results
-                            // todo: actually bind to a specific port on the client side
                             if let Ok(mut stream) =
                                 connect_with_timeout(&addr, connect_timeout).await
                             {
@@ -93,12 +104,13 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
                                 read_with_timeout(&mut stream, read_timeout).await.ok();
                             };
 
-                            // wait before starting a new request
+                            // wait before looping
                             // todo: account for how long the request took
                             Delay::new(tick_delay * config.num_threads as u32 * conns_per_thread)
                                 .map(|_| {})
                                 .await;
 
+                            // bail out of the loop if we're past the duration
                             if let Some(duration) = config.duration {
                                 if Instant::now() > start + duration {
                                     break;
@@ -183,14 +195,17 @@ fn tick_delay(config: &Config) -> Duration {
     Duration::from_nanos(delay_in_nanos as u64)
 }
 
+// todo: Move to tests folder
+// todo: Add test server side results channel to verify client behavior
+
 #[cfg(test)]
 #[allow(unused_imports)]
 mod tests {
     use super::*;
     use crate::setup_logger;
+    use futures::executor;
     use std::io::Result;
     use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV4};
-    use futures::executor;
 
     /// Echo server for unit testing
     fn setup_server() -> SocketAddr {
