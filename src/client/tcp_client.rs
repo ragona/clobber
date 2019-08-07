@@ -1,19 +1,13 @@
-use std::convert::TryInto;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::pin::Pin;
-use std::str;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use futures::executor::LocalPool;
-use futures::io::{self, AllowStdIo, AsyncReadExt, ErrorKind};
+use futures::io::{self, AsyncReadExt};
 use futures::prelude::*;
 use futures::task::{LocalSpawnExt};
 use futures_timer::{Delay, TryFutureExt};
 
-use log::{debug, error, info, warn, LevelFilter};
+use log::{debug, error, info, warn};
 use romio::TcpStream;
 
 use crate::client::stats::Stats;
@@ -204,7 +198,7 @@ mod tests {
         let addr = server.local_addr().unwrap();
         let mut read_buf = [0u8; 128];
 
-        thread::spawn(move || {
+        std::thread::spawn(move || {
             executor::block_on(async {
                 let mut incoming = server.incoming();
                 while let Some(stream) = incoming.next().await {
