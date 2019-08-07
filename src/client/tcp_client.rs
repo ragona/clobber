@@ -44,7 +44,25 @@ impl Config {
     }
 }
 
+/// The goal of this function is to match the requested request rate as closely as
+/// possible. Requests consist of a single transaction: connect, write, read.
+/// disconnect, sleep. Requests are distributed across two axis; threads, and
+/// connections. Connections are evenly distributed across threads. Each thread
+/// has a LocalPool executor that asynchronously works on the thread's connections.
+/// Connections are also evenly distributed in time so that the first connection
+/// will not start again until after the last connection has started:
+///
+/// --------------------------------------------------
+/// thread 1:  a       e       a       e
+/// thread 2:    b       f       b       f
+/// thread 3:      c       g       c       g
+/// thread 4:        d       h       d       h
+/// --------------------------------------------------
+/// 
+/// todo: The word 'connection' implies a persistence that doesn't exist. Fix?
+///
 pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
+
     info!("Starting: {:?}", config);
 
     // todo: add channels back at very end of run
@@ -57,20 +75,6 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
     let conns_per_thread = config.connections / config.num_threads as u32;
 
     let mut threads = vec![];
-
-    // create one loop per connection, but make them wait their turn -- other threads
-    // should go first so that connections are woven across threads, not back to back:
-    // --------------------------------------------------
-    // thread 1:  a       e       a       e
-    // thread 2:    b       f       b       f
-    // thread 3:      c       g       c       g
-    // thread 4:        d       h       d       h
-    // --------------------------------------------------
-    // In this diagram the rows are threads, and letters are our async connections.
-    // Connections are not persistent, but are recursive, and will only loop and make
-    // another call once one is done. This puts a cap on our max connections at once,
-    // and by spreading out the requests like this we even out the load. We give each
-    // future as long as possible to complete without falling behind.
 
     for _ in 0..config.num_threads {
         // per-thread clones
@@ -116,6 +120,8 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
                                     break;
                                 }
                             }
+
+                            // todo: atomicbool to stop thread
                         }
                     })
                     .unwrap();
@@ -134,6 +140,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
         handle.join().unwrap();
     }
 
+    // todo: return real stats
     Ok(Stats::new())
 }
 
