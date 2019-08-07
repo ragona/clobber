@@ -2,7 +2,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use futures::executor::LocalPool;
-use futures::io::{self, AsyncReadExt};
+use futures::io;
 use futures::prelude::*;
 use futures::task::LocalSpawnExt;
 use futures_timer::{Delay, TryFutureExt};
@@ -50,15 +50,17 @@ impl Config {
 /// connections. Connections are evenly distributed across threads. Each thread
 /// has a LocalPool executor that asynchronously works on the thread's connections.
 /// Connections are also evenly distributed in time so that the first connection
-/// will not start again until after the last connection has started:
+/// will not start again until after the last connection has started, meaning that
+/// each connection has rate * num_connections
 ///
+/// 4 threads, 8 connections:
 /// --------------------------------------------------
 /// thread 1:  a       e       a       e
 /// thread 2:    b       f       b       f
 /// thread 3:      c       g       c       g
 /// thread 4:        d       h       d       h
 /// --------------------------------------------------
-/// 
+///
 /// todo: The word 'connection' implies a persistence that doesn't exist. Fix?
 ///
 pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
@@ -70,6 +72,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
     // time variables
     let start = Instant::now();
     let tick_delay = tick_delay(&config);
+    let connection_delay = tick_delay * config.connections;
     let read_timeout = Duration::from_millis(config.read_timeout as u64);
     let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
     let conns_per_thread = config.connections / config.num_threads as u32;
@@ -101,20 +104,6 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
 
                         // connect, write, read loop
                         loop {
-                            if let Ok(mut stream) =
-                                connect_with_timeout(&addr, connect_timeout).await
-                            {
-                                write(&mut stream, &message.body).await.ok();
-                                read_with_timeout(&mut stream, read_timeout).await.ok();
-                            };
-
-                            // wait before looping
-                            // todo: account for how long the request took
-                            Delay::new(tick_delay * config.num_threads as u32 * conns_per_thread)
-                                .map(|_| {})
-                                .await;
-
-                            // bail out of the loop if we're past the duration
                             if let Some(duration) = config.duration {
                                 if Instant::now() > start + duration {
                                     break;
@@ -122,6 +111,22 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
                             }
 
                             // todo: atomicbool to stop thread
+                            let request_start = Instant::now();
+
+                            if let Ok(mut stream) =
+                                connect_with_timeout(&addr, connect_timeout).await
+                            {
+                                write(&mut stream, &message.body).await.ok();
+                                read_with_timeout(&mut stream, read_timeout).await.ok();
+                            };
+
+                            // don't exceed our intended rate
+                            let elapsed = Instant::now() - request_start;
+                            if elapsed < connection_delay {
+                                Delay::new( connection_delay - elapsed)
+                                    .map(|_| {})
+                                    .await;
+                            }
                         }
                     })
                     .unwrap();
