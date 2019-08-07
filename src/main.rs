@@ -1,18 +1,18 @@
 #![feature(async_await)]
 
-#[allow(unused_imports)]
 pub mod client;
 
-use std::net::Ipv4Addr;
-
-use crate::client::{tcp_client, Message};
-use clap::{App, Arg, ArgMatches};
-use client::tcp_client::Config;
-pub use failure::{err_msg, Error};
-use log::LevelFilter;
 use std::io::{stdin, Read};
+use std::net::Ipv4Addr;
 use std::thread;
 use std::time::Duration;
+
+use clap::{App, Arg, ArgMatches};
+pub use failure::{err_msg, Error};
+use humantime;
+use log::LevelFilter;
+
+use crate::client::{tcp_client, Config, Message};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -105,6 +105,12 @@ fn cli() -> App<'static, 'static> {
                 .help("Max number of open connections at any given time")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("duration")
+                .long("duration")
+                .help("Length of the run (e.g. 5s, 10m, 2h, etc...)")
+                .takes_value(true),
+        )
 }
 
 fn settings_from_argmatches(matches: &ArgMatches) -> Config {
@@ -150,12 +156,17 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .parse::<u32>()
         .expect("Failed to parse connections");
 
+    let duration = match matches.value_of("duration") {
+        Some(s) => Some(humantime::parse_duration(s).expect("Failed to parse duration")),
+        None => None,
+    };
+
     Config {
         target,
         port,
         rate,
         num_threads,
-        duration: None, // todo: add human-duration duration value
+        duration, // todo: add human-duration duration value
         connect_timeout,
         read_timeout,
         connections,

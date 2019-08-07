@@ -7,19 +7,17 @@ use std::task::{Context, Poll};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use futures::io::{self, AllowStdIo, AsyncReadExt, AsyncWriteExt, ErrorKind};
+use futures::executor::LocalPool;
+use futures::io::{self, AllowStdIo, AsyncReadExt, ErrorKind};
 use futures::prelude::*;
-use futures::task::{LocalSpawnExt, SpawnExt};
-use futures::{executor, FutureExt, StreamExt};
+use futures::task::{LocalSpawnExt};
 use futures_timer::{Delay, TryFutureExt};
 
 use log::{debug, error, info, warn, LevelFilter};
 use romio::TcpStream;
-use std::ops::Deref;
 
 use crate::client::stats::Stats;
 use crate::Message;
-use futures::executor::{LocalPool, LocalSpawner, ThreadPool, ThreadPoolBuilder};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -55,7 +53,8 @@ impl Config {
 pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
     info!("Starting: {:?}", config);
 
-
+    // todo: add channels back at very end of run
+    // todo: add back graceful ctrl+c handling (atomicbool?)
     // time variables
     let start = Instant::now();
     let tick_delay = tick_delay(&config);
@@ -82,31 +81,38 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
 
                 // create one stream per connection, but make them wait their turn -- other threads
                 // should go first so that connections are woven across threads, not back to back.
-                spawner.spawn_local(async move {
+                spawner
+                    .spawn_local(async move {
+                        // stagger the start of each connection loop to spread out requests
+                        Delay::new(tick_delay * config.num_threads as u32 * i)
+                            .map(|_| {})
+                            .await;
 
-                    // stagger the start of each connection loop to spread out requests
-                    Delay::new(tick_delay * config.num_threads as u32 * i).map(|_| {}).await;
+                        // connect, write, read loop
+                        loop {
+                            // todo: handle results
+                            // todo: actually bind to a specific port on the client side
+                            if let Ok(mut stream) =
+                                connect_with_timeout(&addr, connect_timeout).await
+                            {
+                                write(&mut stream, &message.body).await.ok();
+                                read_with_timeout(&mut stream, read_timeout).await.ok();
+                            };
 
-                    // connect, write, read loop
-                    loop {
-                        // todo: handle results
-                        // todo: actually bind to a specific port on the client side
-                        if let Ok(mut stream) = connect_with_timeout(&addr, connect_timeout).await {
-                            write(&mut stream, &message.body).await;
-                            read_with_timeout(&mut stream, read_timeout).await;
-                        };
+                            // wait before starting a new request
+                            // todo: account for how long the request took
+                            Delay::new(tick_delay * config.num_threads as u32 * conns_per_thread)
+                                .map(|_| {})
+                                .await;
 
-                        // wait before starting a new request
-                        // todo: account for how long the request took
-                        Delay::new(tick_delay * config.num_threads as u32 * conns_per_thread).map(|_| {}).await;
-
-                        if let Some(duration) = config.duration {
-                            if Instant::now() > start + duration {
-                                break;
+                            if let Some(duration) = config.duration {
+                                if Instant::now() > start + duration {
+                                    break;
+                                }
                             }
                         }
-                    }
-                });
+                    })
+                    .unwrap();
             }
 
             pool.run();
@@ -175,7 +181,6 @@ async fn read_with_timeout(stream: &mut TcpStream, timeout: Duration) -> io::Res
     // todo: Do something with the read_buffer?
 }
 
-
 /// Target duration between each individual request.
 fn tick_delay(config: &Config) -> Duration {
     let second = 1e9 as u64; // 1B nanoseconds is a second
@@ -185,11 +190,13 @@ fn tick_delay(config: &Config) -> Duration {
 }
 
 #[cfg(test)]
+#[allow(unused_imports)]
 mod tests {
     use super::*;
     use crate::setup_logger;
     use std::io::Result;
     use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV4};
+    use futures::executor;
 
     /// Echo server for unit testing
     fn setup_server() -> SocketAddr {
@@ -247,8 +254,11 @@ mod tests {
 
         let final_stats = clobber(config, message)?;
 
+        // todo: restore stats
+
         //        assert_eq!(final_stats.connection_attempts, final_stats.connections);
         //        assert_eq!(config.rate, final_stats.connections);
+
         dbg!(final_stats);
 
         Ok(())
