@@ -9,7 +9,7 @@ use crate::client::{tcp_client, Message};
 use clap::{App, Arg, ArgMatches};
 use client::tcp_client::Config;
 pub use failure::{err_msg, Error};
-use log::{info, LevelFilter};
+use log::LevelFilter;
 use std::io::{stdin, Read};
 use std::thread;
 use std::time::Duration;
@@ -99,6 +99,12 @@ fn cli() -> App<'static, 'static> {
                 .help("Timeout for reading data from target")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("connections")
+                .long("connections")
+                .help("Max number of open connections at any given time")
+                .takes_value(true),
+        )
 }
 
 fn settings_from_argmatches(matches: &ArgMatches) -> Config {
@@ -138,6 +144,12 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .parse::<u32>()
         .expect("Failed to parse read-timeout");
 
+    let connections = matches
+        .value_of("connections")
+        .unwrap_or("500")
+        .parse::<u32>()
+        .expect("Failed to parse connections");
+
     Config {
         target,
         port,
@@ -146,6 +158,7 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         duration: None, // todo: add human-duration duration value
         connect_timeout,
         read_timeout,
+        connections,
     }
 }
 

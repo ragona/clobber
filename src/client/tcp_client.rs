@@ -1,13 +1,15 @@
 use std::convert::TryInto;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::pin::Pin;
 use std::str;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use futures::io::{self, AllowStdIo, AsyncReadExt, AsyncWriteExt, ErrorKind};
 use futures::prelude::*;
-use futures::task::{SpawnExt, LocalSpawnExt};
+use futures::task::{LocalSpawnExt, SpawnExt};
 use futures::{executor, FutureExt, StreamExt};
 use futures_timer::{Delay, TryFutureExt};
 
@@ -17,7 +19,7 @@ use std::ops::Deref;
 
 use crate::client::stats::Stats;
 use crate::Message;
-use futures::executor::{ThreadPool, ThreadPoolBuilder, LocalPool, LocalSpawner};
+use futures::executor::{LocalPool, LocalSpawner, ThreadPool, ThreadPoolBuilder};
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -28,6 +30,7 @@ pub struct Config {
     pub num_threads: u16,
     pub connect_timeout: u32,
     pub read_timeout: u32,
+    pub connections: u32,
 }
 
 impl Config {
@@ -40,6 +43,7 @@ impl Config {
             num_threads: 1,
             connect_timeout: 500,
             read_timeout: 500,
+            connections: 10,
         }
     }
 
@@ -51,59 +55,68 @@ impl Config {
 pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
     info!("Starting: {:?}", config);
 
+
+    // time variables
+    let start = Instant::now();
+    let tick_delay = tick_delay(&config);
+    let read_timeout = Duration::from_millis(config.read_timeout as u64);
+    let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
+    let conns_per_thread = config.connections / config.num_threads as u32;
+
     let mut threads = vec![];
 
     for _ in 0..config.num_threads {
-        let start = Instant::now();
+        // per-thread clones
         let config = config.clone();
         let message = message.clone();
-        let tick_delay = Duration::from_nanos((1e9 as usize / config.rate).try_into().unwrap()) * config.num_threads as u32;
-        let read_timeout = Duration::from_millis(config.read_timeout as u64);
-        let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
+        let addr = config.addr();
 
-        let past_duration = || match config.duration {
-            Some(duration) => Instant::now() > start + duration,
-            None => false,
-        };
-
+        // start thread to handle N
         let thread = std::thread::spawn(move || {
             let mut pool = LocalPool::new();
             let mut spawner = pool.spawner();
-            let mut stats = Stats::new();
-            // seed with a couple requests?
 
-//            // eh?
-//            std::thread::spawn(move || {
-//                pool.run();
-//            });
+            for i in 0..conns_per_thread {
+                // per-port clones
+                let message = message.clone();
 
-            executor::block_on(async move {
-                let addr = config.addr();
+                // create one stream per connection, but make them wait their turn -- other threads
+                // should go first so that connections are woven across threads, not back to back.
+                spawner.spawn_local(async move {
 
-                loop {
-                    &spawner.spawn_local(async {
+                    // stagger the start of each connection loop to spread out requests
+                    Delay::new(tick_delay * config.num_threads as u32 * i).map(|_| {}).await;
 
-                        if let Ok(mut stream) = connect_with_timeout(&addr, Duration::from_millis(config.connect_timeout as u64)).await {
-
-                            if let Err(e) = write(&mut stream, &message.body).await {
-
-                            }
-
-                            if let Ok(n) = read_with_timeout(&mut stream, Duration::from_millis(config.read_timeout as u64)).await {
-                            };
+                    // connect, write, read loop
+                    loop {
+                        // todo: handle results
+                        // todo: actually bind to a specific port on the client side
+                        if let Ok(mut stream) = connect_with_timeout(&addr, connect_timeout).await {
+                            write(&mut stream, &message.body).await;
+                            read_with_timeout(&mut stream, read_timeout).await;
                         };
-                    });
-                    Delay::new(tick_delay).map(|_| {}).await;
-                    if past_duration() {
-                        break;
-                    }
-                }
-            });
 
+                        // wait before starting a new request
+                        // todo: account for how long the request took
+                        Delay::new(tick_delay * config.num_threads as u32 * conns_per_thread).map(|_| {}).await;
+
+                        if let Some(duration) = config.duration {
+                            if Instant::now() > start + duration {
+                                break;
+                            }
+                        }
+                    }
+                });
+            }
+
+            pool.run();
         });
 
         threads.push(thread);
-    };
+
+        // stagger the start of each thread
+        std::thread::sleep(tick_delay);
+    }
 
     for handle in threads {
         handle.join().unwrap();
@@ -119,7 +132,9 @@ async fn connect_with_timeout(addr: &SocketAddr, timeout: Duration) -> io::Resul
             Ok(stream)
         }
         Err(e) => {
-            error!("connect error: '{}'", e);
+            if e.kind() != io::ErrorKind::TimedOut {
+                error!("unknown connect error: '{}'", e);
+            }
             Err(e)
         }
     }
@@ -148,7 +163,7 @@ async fn read_with_timeout(stream: &mut TcpStream, timeout: Duration) -> io::Res
             Ok(n)
         }
         Err(ref e) if e.kind() == io::ErrorKind::TimedOut => {
-            warn!("timeout: {:?}", stream);
+            warn!("read timeout: {:?}", stream);
             Err(io::Error::new(io::ErrorKind::TimedOut, "foo"))
         }
         Err(e) => {
@@ -158,6 +173,15 @@ async fn read_with_timeout(stream: &mut TcpStream, timeout: Duration) -> io::Res
     }
 
     // todo: Do something with the read_buffer?
+}
+
+
+/// Target duration between each individual request.
+fn tick_delay(config: &Config) -> Duration {
+    let second = 1e9 as u64; // 1B nanoseconds is a second
+    let delay_in_nanos = second / config.rate as u64;
+
+    Duration::from_nanos(delay_in_nanos as u64)
 }
 
 #[cfg(test)]
@@ -200,7 +224,7 @@ mod tests {
     fn slow_clobber() -> std::io::Result<()> {
         // setup_logger(LevelFilter::Debug).unwrap();
 
-//        let addr = setup_server();
+        //        let addr = setup_server();
         let addr: SocketAddr = "127.0.0.1:7878".parse().unwrap();
         let buffer = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec();
         let message = Message::new(buffer);
@@ -218,6 +242,7 @@ mod tests {
             num_threads: 4,
             connect_timeout: 100,
             read_timeout: 100,
+            connections: 200,
         };
 
         let final_stats = clobber(config, message)?;
