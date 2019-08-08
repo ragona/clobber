@@ -1,6 +1,7 @@
 #![feature(async_await)]
 
 pub mod client;
+pub mod util;
 
 use std::io::{stdin, Read};
 use std::net::Ipv4Addr;
@@ -8,15 +9,12 @@ use std::thread;
 use std::time::Duration;
 
 use clap::{App, Arg, ArgMatches};
-pub use failure::{err_msg, Error};
 use humantime;
 use log::LevelFilter;
 
 use crate::client::{tcp_client, Config, Message};
 
-pub type Result<T> = std::result::Result<T, Error>;
-
-fn main() -> Result<()> {
+fn main() {
     let cli = cli();
     let matches = cli.get_matches();
     let settings = settings_from_argmatches(&matches);
@@ -28,23 +26,14 @@ fn main() -> Result<()> {
         _ => log::LevelFilter::Warn,
     };
 
-    setup_logger(log_level)?;
+    setup_logger(log_level).expect("Failed to setup logger");
 
     let bytes = match optional_stdin() {
         Some(bytes) => bytes,
         None => unimplemented!("no request body"), // todo: Load from file
     };
 
-    let message = Message::new(bytes);
-
-    // catch interrupt and gracefully shut down child threads
-    //    std::thread::spawn(move || {
-    //        shutdown(close_sender);
-    //    });
-
-    tcp_client::clobber(settings, message)?;
-
-    Ok(())
+    tcp_client::clobber(settings, Message::new(bytes)).expect("Failed to clobber :(");
 }
 
 fn cli() -> App<'static, 'static> {
@@ -129,14 +118,8 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
     let rate = matches
         .value_of("rate")
         .unwrap_or("0")
-        .parse::<usize>()
+        .parse::<u32>()
         .expect("Failed to parse rate");
-
-    let num_threads = matches
-        .value_of("threads")
-        .unwrap_or("4")
-        .parse::<u16>()
-        .expect("Failed to parse number of threads");
 
     let connect_timeout = matches
         .value_of("connect-timeout")
@@ -156,24 +139,40 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .parse::<u32>()
         .expect("Failed to parse connections");
 
+    let mut num_threads = matches
+        .value_of("threads")
+        .unwrap_or("0")
+        .parse::<u32>()
+        .expect("Failed to parse number of threads");
+
+    // todo: move to clobber
     let duration = match matches.value_of("duration") {
         Some(s) => Some(humantime::parse_duration(s).expect("Failed to parse duration")),
         None => None,
     };
+
+    let rate = match rate {
+        0 => None,
+        n => Some(n),
+    };
+
+    if num_threads == 0 {
+        num_threads = num_cpus::get() as u32;
+    }
 
     Config {
         target,
         port,
         rate,
         num_threads,
-        duration, // todo: add human-duration duration value
+        duration,
         connect_timeout,
         read_timeout,
         connections,
     }
 }
 
-pub fn setup_logger(log_level: LevelFilter) -> Result<()> {
+pub fn setup_logger(log_level: LevelFilter) -> Result<(), Box<dyn std::error::Error>> {
     fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(

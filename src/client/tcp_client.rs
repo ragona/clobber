@@ -5,21 +5,21 @@ use futures::executor::LocalPool;
 use futures::io;
 use futures::prelude::*;
 use futures::task::LocalSpawnExt;
-use futures_timer::{Delay, TryFutureExt};
+use futures_timer::TryFutureExt;
 
 use log::{debug, error, info, warn};
 use romio::TcpStream;
 
-use crate::client::stats::Stats;
+use crate::util;
 use crate::Message;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
-    pub rate: usize,
+    pub rate: Option<u32>, // todo: Make this an option
     pub port: u16,
     pub target: Ipv4Addr,
     pub duration: Option<Duration>,
-    pub num_threads: u16,
+    pub num_threads: u32,
     pub connect_timeout: u32,
     pub read_timeout: u32,
     pub connections: u32,
@@ -30,11 +30,11 @@ impl Config {
         Config {
             port,
             target,
-            rate: 1,
+            rate: None,
             duration: None,
             num_threads: 1,
-            connect_timeout: 500,
-            read_timeout: 500,
+            connect_timeout: 250,
+            read_timeout: 250,
             connections: 10,
         }
     }
@@ -51,7 +51,7 @@ impl Config {
 /// has a LocalPool executor that asynchronously works on the thread's connections.
 /// Connections are also evenly distributed in time so that the first connection
 /// will not start again until after the last connection has started, meaning that
-/// each connection has rate * num_connections
+/// each connection a delay of has rate * num_connections.
 ///
 /// 4 threads, 8 connections:
 /// --------------------------------------------------
@@ -61,29 +61,38 @@ impl Config {
 /// thread 4:        d       h       d       h
 /// --------------------------------------------------
 ///
-/// todo: The word 'connection' implies a persistence that doesn't exist. Fix?
-///
-pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
+pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
+    info!("Starting: {:#?}", config);
 
-    info!("Starting: {:?}", config);
-
-    // todo: add channels back at very end of run
-    // todo: add back graceful ctrl+c handling (atomicbool?)
-    // time variables
-    let start = Instant::now();
-    let tick_delay = tick_delay(&config);
-    let connection_delay = tick_delay * config.connections;
+    let num_threads = match config.num_threads {
+        0 => num_cpus::get() as u32,
+        n => n,
+    };
     let read_timeout = Duration::from_millis(config.read_timeout as u64);
     let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
-    let conns_per_thread = config.connections / config.num_threads as u32;
+    let conns_per_thread = config.connections / num_threads as u32;
 
-    let mut threads = vec![];
+    // things get weird if you have fewer connections than threads
+    let conns_per_thread = match conns_per_thread {
+        0 => num_threads,
+        n => n,
+    };
 
-    for _ in 0..config.num_threads {
+    // if there is no rate defined we mostly just go as fast as possible, but it
+    // still has benefits to stagger the start of the connections.
+    let tick = match config.rate {
+        Some(rate) => Duration::from_nanos(1e9 as u64 / rate as u64),
+        None => Duration::from_micros(100),
+    };
+
+    let mut threads = Vec::with_capacity(num_threads as usize);
+
+    for _ in 0..num_threads {
         // per-thread clones
         let config = config.clone();
         let message = message.clone();
         let addr = config.addr();
+        let start = Instant::now();
 
         // start thread which will contain a chunk of connections
         let thread = std::thread::spawn(move || {
@@ -98,9 +107,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
                 spawner
                     .spawn_local(async move {
                         // stagger the start of each connection loop to spread out requests
-                        Delay::new(tick_delay * config.num_threads as u32 * i)
-                            .map(|_| {})
-                            .await;
+                        util::sleep(tick * num_threads * i).await;
 
                         // connect, write, read loop
                         loop {
@@ -110,7 +117,6 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
                                 }
                             }
 
-                            // todo: atomicbool to stop thread
                             let request_start = Instant::now();
 
                             if let Ok(mut stream) =
@@ -120,12 +126,15 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
                                 read_with_timeout(&mut stream, read_timeout).await.ok();
                             };
 
-                            // don't exceed our intended rate
-                            let elapsed = Instant::now() - request_start;
-                            if elapsed < connection_delay {
-                                Delay::new( connection_delay - elapsed)
-                                    .map(|_| {})
-                                    .await;
+                            // optional rate limiting
+                            if let Some(_rate) = config.rate {
+                                let elapsed = Instant::now() - request_start;
+                                let delay = tick * conns_per_thread * num_threads;
+                                if elapsed < delay {
+                                    util::sleep(delay - elapsed).await;
+                                } else {
+                                    warn!("running behind; consider adding more connections");
+                                }
                             }
                         }
                     })
@@ -137,16 +146,15 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<Stats> {
 
         threads.push(thread);
 
-        // stagger the start of each thread
-        std::thread::sleep(tick_delay);
+        // stagger the start of each thread by a single tick
+        std::thread::sleep(tick);
     }
 
     for handle in threads {
         handle.join().unwrap();
     }
 
-    // todo: return real stats
-    Ok(Stats::new())
+    Ok(())
 }
 
 async fn connect_with_timeout(addr: &SocketAddr, timeout: Duration) -> io::Result<TcpStream> {
@@ -197,14 +205,6 @@ async fn read_with_timeout(stream: &mut TcpStream, timeout: Duration) -> io::Res
     }
 
     // todo: Do something with the read_buffer?
-}
-
-/// Target duration between each individual request.
-fn tick_delay(config: &Config) -> Duration {
-    let second = 1e9 as u64; // 1B nanoseconds is a second
-    let delay_in_nanos = second / config.rate as u64;
-
-    Duration::from_nanos(delay_in_nanos as u64)
 }
 
 // todo: Move to tests folder
@@ -264,23 +264,21 @@ mod tests {
 
         let config = Config {
             target,
-            rate: 1000,
+            rate: None,
             port: addr.port(),
             duration: Some(Duration::from_millis(1000)),
-            num_threads: 4,
+            num_threads: 0,
             connect_timeout: 100,
             read_timeout: 100,
-            connections: 200,
+            connections: 2,
         };
 
-        let final_stats = clobber(config, message)?;
+        clobber(config, message)?;
 
         // todo: restore stats
 
         //        assert_eq!(final_stats.connection_attempts, final_stats.connections);
         //        assert_eq!(config.rate, final_stats.connections);
-
-        dbg!(final_stats);
 
         Ok(())
     }

@@ -1,5 +1,5 @@
-use failure::_core::ops::Add;
-use failure::_core::time::Duration;
+use std::ops::Add;
+use std::time::Duration;
 use std::time::Instant;
 
 #[derive(Debug, Copy, Clone)]

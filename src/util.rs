@@ -1,8 +1,10 @@
-// Currently excluded from module tree. Rand adds a ton of dependencies and slows build time. :(
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::time::Duration;
 
-use std::net::{Ipv4Addr, SocketAddrV4, SocketAddr};
+use futures::prelude::*;
+use futures_timer::Delay;
 
-use rand::{self, Rng};
+use rand::Rng;
 
 pub fn random_ipv4_addr(port: u16) -> SocketAddr {
     let random_bytes = rand::thread_rng().gen::<[u8; 4]>();
@@ -10,8 +12,12 @@ pub fn random_ipv4_addr(port: u16) -> SocketAddr {
         random_bytes[0],
         random_bytes[1],
         random_bytes[2],
-        random_bytes[3]);
+        random_bytes[3],
+    );
 
-    SocketAddrV4::new(ip, port)
-        .into()
+    SocketAddrV4::new(ip, port).into()
+}
+
+pub async fn sleep(duration: Duration) {
+    Delay::new(duration).map(|_| {}).await
 }
