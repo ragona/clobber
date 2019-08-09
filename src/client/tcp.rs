@@ -15,7 +15,7 @@ use crate::Message;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
-    pub rate: Option<u32>, // todo: Make this an option
+    pub rate: Option<u32>,
     pub port: u16,
     pub target: Ipv4Addr,
     pub duration: Option<Duration>,
@@ -44,14 +44,16 @@ impl Config {
     }
 }
 
-/// The goal of this function is to match the requested request rate as closely as
-/// possible. Requests consist of a single transaction: connect, write, read.
-/// disconnect, sleep. Requests are distributed across two axis; threads, and
-/// connections. Connections are evenly distributed across threads. Each thread
-/// has a LocalPool executor that asynchronously works on the thread's connections.
-/// Connections are also evenly distributed in time so that the first connection
-/// will not start again until after the last connection has started, meaning that
-/// each connection a delay of has rate * num_connections.
+/// This function's goal is to make as many TCP requests as possible. Two common blockers
+/// for achieving high TCP throughput are getting capped on number of open file descriptors,
+/// or running out of available ports. It helps to avoid bursts of traffic, so this function
+/// spreads out requests as much as possible across both thread and time.
+///
+/// If no `rate` is supplied, `clobber` will create `connections` number of async futures,
+/// distribute them across `threads` threads (defaults to num_cpus), and each future will perform
+/// requests in a tigh loop. If there is a rate specified, there will be an optional sleep to stay
+/// under the requested rate. The futures are driven by a LocalPool executor, and there is no
+/// cross-thread synchronization or communication.
 ///
 /// 4 threads, 8 connections:
 /// --------------------------------------------------
@@ -82,7 +84,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
     // still has benefits to stagger the start of the connections.
     let tick = match config.rate {
         Some(rate) => Duration::from_nanos(1e9 as u64 / rate as u64),
-        None => Duration::from_micros(100),
+        None => Duration::from_secs(1), // todo fix
     };
 
     let mut threads = Vec::with_capacity(num_threads as usize);
@@ -99,15 +101,17 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
             let mut pool = LocalPool::new();
             let mut spawner = pool.spawner();
 
-            // immediately create all connections, but don't let them start until it's their turn
+            // all connection futures are spawned at runtime
             for i in 0..conns_per_thread {
                 // per-connection clones
                 let message = message.clone();
 
                 spawner
                     .spawn_local(async move {
-                        // stagger the start of each connection loop to spread out requests
-                        util::sleep(tick * num_threads * i).await;
+                        // spread out loop start times within a thread to smoothly match rate
+                        if config.rate.is_some() {
+                            util::sleep(tick * num_threads * i).await;
+                        }
 
                         // connect, write, read loop
                         loop {
@@ -122,14 +126,15 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                             if let Ok(mut stream) =
                                 connect_with_timeout(&addr, connect_timeout).await
                             {
-                                write(&mut stream, &message.body).await.ok();
-                                read_with_timeout(&mut stream, read_timeout).await.ok();
-                            };
+                                if let Ok(_) = write(&mut stream, &message.body).await {
+                                    read_with_timeout(&mut stream, read_timeout).await.ok();
+                                }
+                            }
 
-                            // optional rate limiting
-                            if let Some(_rate) = config.rate {
+                            if config.rate.is_some() {
                                 let elapsed = Instant::now() - request_start;
                                 let delay = tick * conns_per_thread * num_threads;
+
                                 if elapsed < delay {
                                     util::sleep(delay - elapsed).await;
                                 } else {
@@ -309,7 +314,7 @@ mod tests {
             _ => false,
         };
 
-        // todo: this test only usually works -- disabling for now
+        // todo: this test only usually works -- disabling for now :(
         // assert!(timed_out);
 
         Ok(())

@@ -12,7 +12,7 @@ use clap::{App, Arg, ArgMatches};
 use humantime;
 use log::LevelFilter;
 
-use crate::client::{tcp_client, Config, Message};
+use crate::client::{tcp, Config, Message};
 
 fn main() {
     let cli = cli();
@@ -33,7 +33,7 @@ fn main() {
         None => unimplemented!("no request body"), // todo: Load from file
     };
 
-    tcp_client::clobber(settings, Message::new(bytes)).expect("Failed to clobber :(");
+    tcp::clobber(settings, Message::new(bytes)).expect("Failed to clobber :(");
 }
 
 fn cli() -> App<'static, 'static> {

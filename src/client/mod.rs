@@ -1,8 +1,8 @@
 pub mod stats;
-pub mod tcp_client;
+pub mod tcp;
 
 pub use stats::Stats;
-pub use tcp_client::Config;
+pub use tcp::Config;
 
 #[derive(Debug, Clone)]
 pub struct Message {
