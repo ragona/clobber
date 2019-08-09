@@ -2,9 +2,9 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use futures::executor::LocalPool;
-use futures::io;
+use futures::{io};
 use futures::prelude::*;
-use futures::task::LocalSpawnExt;
+use futures::task::{SpawnExt};
 use futures_timer::TryFutureExt;
 
 use log::{debug, error, info, warn};
@@ -70,21 +70,30 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
         0 => num_cpus::get() as u32,
         n => n,
     };
-    let read_timeout = Duration::from_millis(config.read_timeout as u64);
-    let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
-    let conns_per_thread = config.connections / num_threads as u32;
 
     // things get weird if you have fewer connections than threads
-    let conns_per_thread = match conns_per_thread {
-        0 => num_threads,
+    let conns_per_thread = match config.connections / num_threads as u32 {
+        0 => 1,
         n => n,
     };
 
-    // if there is no rate defined we mostly just go as fast as possible, but it
-    // still has benefits to stagger the start of the connections.
+    let start = Instant::now();
+    let read_timeout = Duration::from_millis(config.read_timeout as u64);
+    let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
     let tick = match config.rate {
         Some(rate) => Duration::from_nanos(1e9 as u64 / rate as u64),
-        None => Duration::from_secs(1), // todo fix
+        None => Duration::default(),
+    };
+
+    let limit_rate = async move |request_start: Instant| {
+        let elapsed = Instant::now() - request_start;
+        let delay = tick * conns_per_thread * num_threads;
+
+        if elapsed < delay {
+            util::sleep(delay - elapsed).await;
+        } else {
+            warn!("running behind; consider adding more connections");
+        }
     };
 
     let mut threads = Vec::with_capacity(num_threads as usize);
@@ -94,7 +103,6 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
         let config = config.clone();
         let message = message.clone();
         let addr = config.addr();
-        let start = Instant::now();
 
         // start thread which will contain a chunk of connections
         let thread = std::thread::spawn(move || {
@@ -105,9 +113,10 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
             for i in 0..conns_per_thread {
                 // per-connection clones
                 let message = message.clone();
+                let config = config.clone();
 
                 spawner
-                    .spawn_local(async move {
+                    .spawn(async move {
                         // spread out loop start times within a thread to smoothly match rate
                         if config.rate.is_some() {
                             util::sleep(tick * num_threads * i).await;
@@ -116,13 +125,12 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                         // connect, write, read loop
                         loop {
                             if let Some(duration) = config.duration {
-                                if Instant::now() > start + duration {
+                                if Instant::now() >= start + duration {
                                     break;
                                 }
                             }
 
                             let request_start = Instant::now();
-
                             if let Ok(mut stream) =
                                 connect_with_timeout(&addr, connect_timeout).await
                             {
@@ -132,14 +140,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                             }
 
                             if config.rate.is_some() {
-                                let elapsed = Instant::now() - request_start;
-                                let delay = tick * conns_per_thread * num_threads;
-
-                                if elapsed < delay {
-                                    util::sleep(delay - elapsed).await;
-                                } else {
-                                    warn!("running behind; consider adding more connections");
-                                }
+                                limit_rate(request_start).await
                             }
                         }
                     })
