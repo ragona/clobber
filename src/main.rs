@@ -1,10 +1,7 @@
-#![feature(async_await, async_closure)]
-
-pub mod client;
-pub mod util;
+#![feature(async_await)]
 
 use std::io::{stdin, Read};
-use std::net::Ipv4Addr;
+use std::net::SocketAddr;
 use std::thread;
 use std::time::Duration;
 
@@ -12,7 +9,10 @@ use clap::{App, Arg, ArgMatches};
 use humantime;
 use log::LevelFilter;
 
-use crate::client::{tcp, Config, Message};
+pub mod client;
+pub mod util;
+
+use client::{tcp, Config, Message};
 
 fn main() {
     let cli = cli();
@@ -46,14 +46,6 @@ fn cli() -> App<'static, 'static> {
                 .short("t")
                 .long("target")
                 .help("Host to clobber")
-                .takes_value(true)
-                .required(true),
-        )
-        .arg(
-            Arg::with_name("port")
-                .short("p")
-                .long("port")
-                .help("Port to connect to")
                 .takes_value(true)
                 .required(true),
         )
@@ -105,15 +97,9 @@ fn cli() -> App<'static, 'static> {
 fn settings_from_argmatches(matches: &ArgMatches) -> Config {
     let target = matches
         .value_of("target")
-        .expect("Failed to parse target")
-        .parse::<Ipv4Addr>()
+        .expect("target is mandatory")
+        .parse::<SocketAddr>()
         .expect("Failed to parse target");
-
-    let port = matches
-        .value_of("port")
-        .unwrap_or("80")
-        .parse::<u16>()
-        .expect("Failed to parse port");
 
     let rate = matches
         .value_of("rate")
@@ -161,14 +147,13 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
     }
 
     Config {
-        target,
-        port,
         rate,
-        num_threads,
+        target,
         duration,
-        connect_timeout,
-        read_timeout,
         connections,
+        num_threads,
+        read_timeout,
+        connect_timeout,
     }
 }
 

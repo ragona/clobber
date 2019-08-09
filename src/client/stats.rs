@@ -1,3 +1,4 @@
+use std::cmp::{max, min};
 use std::ops::Add;
 use std::time::Duration;
 use std::time::Instant;
@@ -35,13 +36,16 @@ impl Add for Stats {
     type Output = Stats;
 
     fn add(self: Stats, other: Stats) -> Stats {
+        let start_time = min(self.start_time, other.start_time);
+        let end_time = max(self.end_time, other.end_time);
+
         Stats {
             bytes_read: self.bytes_read + other.bytes_read,
             bytes_written: self.bytes_written + other.bytes_written,
             connections: self.connections + other.connections,
             connection_attempts: self.connection_attempts + other.connection_attempts,
-            start_time: self.start_time,
-            end_time: other.end_time, // todo: Is this right?
+            start_time,
+            end_time,
         }
     }
 }

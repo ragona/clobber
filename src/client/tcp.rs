@@ -1,4 +1,4 @@
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use futures::executor::LocalPool;
@@ -11,13 +11,12 @@ use log::{debug, error, info, warn};
 use romio::TcpStream;
 
 use crate::util;
-use crate::Message;
+use crate::client::Message;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
     pub rate: Option<u32>,
-    pub port: u16,
-    pub target: Ipv4Addr,
+    pub target: SocketAddr,
     pub duration: Option<Duration>,
     pub num_threads: u32,
     pub connect_timeout: u32,
@@ -26,9 +25,8 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(target: Ipv4Addr, port: u16) -> Config {
+    pub fn new(target: SocketAddr) -> Config {
         Config {
-            port,
             target,
             rate: None,
             duration: None,
@@ -37,10 +35,6 @@ impl Config {
             read_timeout: 250,
             connections: 10,
         }
-    }
-
-    pub fn addr(self: &Self) -> SocketAddr {
-        SocketAddr::new(self.target.into(), self.port)
     }
 }
 
@@ -85,24 +79,14 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
         None => Duration::default(),
     };
 
-    let limit_rate = async move |request_start: Instant| {
-        let elapsed = Instant::now() - request_start;
-        let delay = tick * conns_per_thread * num_threads;
-
-        if elapsed < delay {
-            util::sleep(delay - elapsed).await;
-        } else {
-            warn!("running behind; consider adding more connections");
-        }
-    };
-
     let mut threads = Vec::with_capacity(num_threads as usize);
 
     for _ in 0..num_threads {
         // per-thread clones
+        let addr = config.target.clone();
         let config = config.clone();
         let message = message.clone();
-        let addr = config.addr();
+
 
         // start thread which will contain a chunk of connections
         let thread = std::thread::spawn(move || {
@@ -140,7 +124,14 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                             }
 
                             if config.rate.is_some() {
-                                limit_rate(request_start).await
+                                let elapsed = Instant::now() - request_start;
+                                let delay = tick * conns_per_thread * num_threads;
+
+                                if elapsed < delay {
+                                    util::sleep(delay - elapsed).await;
+                                } else {
+                                    warn!("running behind; consider adding more connections");
+                                }
                             }
                         }
                     })
@@ -211,162 +202,5 @@ async fn read_with_timeout(stream: &mut TcpStream, timeout: Duration) -> io::Res
     }
 
     // todo: Do something with the read_buffer?
-}
-
-// todo: Move to tests folder
-// todo: Add test server side results channel to verify client behavior
-
-#[cfg(test)]
-#[allow(unused_imports)]
-mod tests {
-    use super::*;
-    use crate::setup_logger;
-    use futures::executor;
-    use std::io::Result;
-    use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV4};
-
-    /// Echo server for unit testing
-    fn setup_server() -> SocketAddr {
-        let mut server = romio::TcpListener::bind(&"127.0.0.1:0".parse().unwrap()).unwrap();
-        let addr = server.local_addr().unwrap();
-        let mut read_buf = [0u8; 128];
-
-        std::thread::spawn(move || {
-            executor::block_on(async {
-                let mut incoming = server.incoming();
-                while let Some(stream) = incoming.next().await {
-                    match stream {
-                        Ok(mut stream) => {
-                            juliex::spawn(async move {
-                                stream.read(&mut read_buf).await.unwrap();
-                                stream.write(&read_buf).await.unwrap();
-                                stream.close().await.unwrap();
-                            });
-                        }
-                        Err(e) => {
-                            panic!(e);
-                        }
-                    }
-                }
-            })
-        });
-
-        addr
-    }
-
-    #[test]
-    fn slow_clobber() -> std::io::Result<()> {
-        // setup_logger(LevelFilter::Debug).unwrap();
-
-        //        let addr = setup_server();
-        let addr: SocketAddr = "127.0.0.1:7878".parse().unwrap();
-        let buffer = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec();
-        let message = Message::new(buffer);
-
-        let target = match addr.ip() {
-            IpAddr::V4(ip) => ip,
-            IpAddr::V6(_) => unimplemented!("todo: support ipv6"),
-        };
-
-        let config = Config {
-            target,
-            rate: None,
-            port: addr.port(),
-            duration: Some(Duration::from_millis(1000)),
-            num_threads: 0,
-            connect_timeout: 100,
-            read_timeout: 100,
-            connections: 2,
-        };
-
-        clobber(config, message)?;
-
-        // todo: restore stats
-
-        //        assert_eq!(final_stats.connection_attempts, final_stats.connections);
-        //        assert_eq!(config.rate, final_stats.connections);
-
-        Ok(())
-    }
-
-    #[test]
-    fn connect() -> Result<()> {
-        let addr = setup_server();
-        executor::block_on(async {
-            TcpStream::connect(&addr)
-                .timeout(Duration::from_millis(100))
-                .await?;
-
-            Ok::<_, io::Error>(())
-        })?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn connect_timeout() -> std::io::Result<()> {
-        let addr = setup_server();
-        let result = executor::block_on(async {
-            connect_with_timeout(&addr, Duration::from_nanos(1)).await
-        });
-
-        let _timed_out = match result {
-            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => true,
-            _ => false,
-        };
-
-        // todo: this test only usually works -- disabling for now :(
-        // assert!(timed_out);
-
-        Ok(())
-    }
-
-    #[test]
-    fn write() -> std::io::Result<()> {
-        let addr = setup_server();
-        let buffer = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n";
-
-        executor::block_on(async {
-            let mut stream = TcpStream::connect(&addr)
-                .timeout(Duration::from_millis(100))
-                .await?;
-
-            stream.write_all(buffer).await
-        })?;
-
-        Ok(())
-    }
-
-    #[test]
-    fn read() -> std::io::Result<()> {
-        let addr = setup_server();
-        let write_buffer = b"GET / HTTP/1.1\r\n\r\n";
-        let mut read_buffer = vec![];
-
-        executor::block_on(async {
-            let mut stream = TcpStream::connect(&addr)
-                .timeout(Duration::from_millis(100))
-                .await?;
-
-            stream.write_all(write_buffer).await.unwrap();
-
-            match stream
-                .read_to_end(&mut read_buffer)
-                .timeout(Duration::from_millis(100))
-                .await
-            {
-                Ok(_) => {}
-                Err(_) => {}
-            };
-
-            Ok::<_, io::Error>(())
-        })?;
-
-        assert_eq!(
-            &write_buffer[..],
-            &read_buffer.as_slice()[0..write_buffer.len()]
-        );
-
-        Ok(())
-    }
+    // todo: Perf testing on more verbose logging for analysis
 }
