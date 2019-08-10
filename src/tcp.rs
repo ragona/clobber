@@ -10,7 +10,7 @@ use log::{debug, error, info, warn};
 use romio::TcpStream;
 
 use crate::Message;
-use crate::util;
+use futures_timer::Delay;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -99,7 +99,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                     .spawn(async move {
                         // spread out loop start times within a thread to smoothly match rate
                         if config.rate.is_some() {
-                            util::sleep(tick * num_threads * i).await;
+                            Delay::new(tick * num_threads * i).await.unwrap();
                         }
 
                         // connect, write, read in a tight loop
@@ -129,7 +129,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                                 let delay = tick * conns_per_thread * num_threads;
 
                                 if elapsed < delay {
-                                    util::sleep(delay - elapsed).await;
+                                    Delay::new(delay - elapsed).await.unwrap();
                                 } else {
                                     warn!("running behind; consider adding more connections");
                                 }
