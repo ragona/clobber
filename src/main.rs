@@ -38,7 +38,6 @@ fn main() {
 fn cli() -> App<'static, 'static> {
     App::new("clobber")
         .version("0.1")
-        .author("ryan ragona <ryan@ragona.com>")
         .about("tcp load testing tool")
         .arg(
             Arg::with_name("target")
@@ -50,7 +49,6 @@ fn cli() -> App<'static, 'static> {
         )
         .arg(
             Arg::with_name("rate")
-                .short("r")
                 .long("rate")
                 .help("Limit to a particular rate per-second.")
                 .takes_value(true),
@@ -65,7 +63,21 @@ fn cli() -> App<'static, 'static> {
             Arg::with_name("v")
                 .short("v")
                 .multiple(true)
-                .help("Sets the level of verbosity"),
+                .help("Sets the log level, from -v to -vvv"),
+        )
+        .arg(
+            Arg::with_name("connections")
+                .short("c")
+                .long("connections")
+                .help("Max number of open connections at any given time")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("duration")
+                .short("d")
+                .long("duration")
+                .help("Length of the run (e.g. 5s, 10m, 2h, etc...)")
+                .takes_value(true),
         )
         .arg(
             Arg::with_name("connect-timeout")
@@ -76,19 +88,7 @@ fn cli() -> App<'static, 'static> {
         .arg(
             Arg::with_name("read-timeout")
                 .long("read-timeout")
-                .help("Timeout for reading data from target")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("connections")
-                .long("connections")
-                .help("Max number of open connections at any given time")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("duration")
-                .long("duration")
-                .help("Length of the run (e.g. 5s, 10m, 2h, etc...)")
+                .help("Timeout for reading response from target")
                 .takes_value(true),
         )
 }
@@ -96,7 +96,7 @@ fn cli() -> App<'static, 'static> {
 fn settings_from_argmatches(matches: &ArgMatches) -> Config {
     let target = matches
         .value_of("target")
-        .expect("target is mandatory")
+        .unwrap()
         .parse::<SocketAddr>()
         .expect("Failed to parse target");
 
@@ -106,12 +106,14 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .parse::<u32>()
         .expect("Failed to parse rate");
 
-    let connect_timeout = match matches.value_of("connect-timeout") {
-        Some(timeout) => {
-            let n: u32 = timeout.parse().expect("Failed to parse connect_timeout");
+    let connections = matches
+        .value_of("connections")
+        .unwrap_or("100")
+        .parse::<u32>()
+        .expect("Failed to parse connections");
 
-            Some(n)
-        }
+    let connect_timeout = match matches.value_of("connect-timeout") {
+        Some(timeout) => Some(timeout.parse().expect("Failed to parse connect_timeout")),
         None => None,
     };
 
@@ -125,13 +127,6 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         None => None,
     };
 
-    let connections = matches
-        .value_of("connections")
-        .unwrap_or("500")
-        .parse::<u32>()
-        .expect("Failed to parse connections");
-
-    // todo: move to clobber
     let duration = match matches.value_of("duration") {
         Some(s) => Some(humantime::parse_duration(s).expect("Failed to parse duration")),
         None => None,
