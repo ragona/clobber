@@ -9,7 +9,7 @@ use futures::task::SpawnExt;
 use log::{debug, error, info, warn};
 use romio::TcpStream;
 
-use crate::client::Message;
+use crate::Message;
 use crate::util;
 
 #[derive(Debug, Copy, Clone)]

@@ -1,5 +1,7 @@
 #![feature(async_await)]
 
+extern crate clobber;
+
 use std::io::{stdin, Read};
 use std::net::SocketAddr;
 use std::thread;
@@ -9,10 +11,7 @@ use clap::{App, Arg, ArgMatches};
 use humantime;
 use log::LevelFilter;
 
-pub mod client;
-pub mod util;
-
-use client::{tcp, Config, Message};
+use clobber::{tcp, Config, Message};
 
 fn main() {
     let cli = cli();

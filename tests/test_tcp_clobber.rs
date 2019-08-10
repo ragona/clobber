@@ -6,7 +6,7 @@ use std::time::Duration;
 use futures::executor;
 use futures::prelude::*;
 
-use clobber::client::{self, Config, Message, Stats};
+use clobber::{tcp, Config, Message, Stats};
 use crossbeam_channel::Receiver;
 
 /// Echo server for testing
@@ -77,7 +77,7 @@ fn slow() -> std::io::Result<()> {
         connections: 10,
     };
 
-    client::tcp::clobber(config, test_message())?;
+    tcp::clobber(config, test_message())?;
 
     let stats = get_stats(receiver);
     let rate = config.rate.unwrap();
