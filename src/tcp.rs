@@ -1,3 +1,6 @@
+//!
+//! This module is the guts of `clobber`
+//!
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -12,56 +15,70 @@ use romio::TcpStream;
 use crate::Message;
 use futures_timer::Delay;
 
+/// Settings for the load test
+///
+/// todo: Make write/read optional. (Enum?)
+///
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
-    pub rate: Option<u32>,
+    /// Socket address (ip and port) of the host we'll be calling
     pub target: SocketAddr,
-    pub duration: Option<Duration>,
-    pub num_threads: u32,
-    pub connect_timeout: u32,
-    pub read_timeout: u32,
+    /// Connections is the a key knob to turn when tuning a performance test. Honestly
+    /// 'connections' isn't the best name; it implies a certain persistance that
     pub connections: u32,
+    /// Optional rate-limiting. Precisely timing high rates is unreliable; if you're
+    /// seeing slower than expected performance try running with no rate limit at all.
+    pub rate: Option<u32>,
+    /// Optional duration. If duration is None, clobber will run indefinitely.
+    pub duration: Option<Duration>,
+    /// Number of OS threads to distribute work between. 0 becomes num_cpus.
+    pub num_threads: Option<u32>,
+    /// Optionally time out requests at a number of milliseconds. Note: checking timeouts
+    /// costs CPU cycles; max performance will suffer. However, if you have an ill-behaving
+    /// server that isn't connecting consistently and is hanging onto connections, this can
+    /// improve the situation.
+    pub connect_timeout: Option<u32>,
+    /// Optionally time out read requests at a number of milliseconds. Note: checking timeouts
+    /// costs CPU cycles; max performance will suffer. However, if you have an ill-behaving server
+    /// that isn't sending EOF bytes or otherwise isn't dropping connections, this can be
+    /// essential to maintaing a high(ish) throughput, at the cost of more CPU load.
+    pub read_timeout: Option<u32>,
 }
 
 impl Config {
-    pub fn new(target: SocketAddr) -> Config {
+    // todo: builder pattern
+    pub fn new(target: SocketAddr, connections: u32) -> Config {
         Config {
             target,
+            connections,
             rate: None,
             duration: None,
-            num_threads: 1,
-            connect_timeout: 250,
-            read_timeout: 250,
-            connections: 10,
+            num_threads: None,
+            read_timeout: None,
+            connect_timeout: None,
         }
     }
 }
 
+///
 /// This function's goal is to make as many TCP requests as possible. Two common blockers
 /// for achieving high TCP throughput are getting capped on number of open file descriptors,
-/// or running out of available ports. It helps to avoid bursts of traffic, so this function
-/// spreads out requests as much as possible across both thread and time.
+/// or running out of available ports. `clobber` tries to minimize open ports and files by
+/// limiting the number of active requests via the `connections` argument.
 ///
-/// If no `rate` is supplied, `clobber` will create `connections` number of async futures,
-/// distribute them across `threads` threads (defaults to num_cpus), and each future will perform
-/// requests in a tight loop. If there is a rate specified, there will be an optional sleep to stay
-/// under the requested rate. The futures are driven by a LocalPool executor, and there is no
-/// cross-thread synchronization or communication.
-///
-/// 4 threads, 8 connections:
-/// --------------------------------------------------
-/// thread 1:  a       e       a       e
-/// thread 2:    b       f       b       f
-/// thread 3:      c       g       c       g
-/// thread 4:        d       h       d       h
-/// --------------------------------------------------
+/// `clobber` will create `connections` number of async futures, distribute them across `threads`
+/// threads (defaults to num_cpus), and each future will perform requests in a tight loop. If
+/// there is a `rate` specified, there will be an optional delay to stay under the requested rate.
+/// The futures are driven by a LocalPool executor, and there is no cross-thread synchronization
+/// or communication with the default config. Note: for maximum performance avoid use of the
+/// `rate`, `connect_timeout`, and `read_timeout` options..
 ///
 pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
     info!("Starting: {:#?}", config);
 
     let num_threads = match config.num_threads {
-        0 => num_cpus::get() as u32,
-        n => n,
+        None => num_cpus::get() as u32,
+        Some(n) => n,
     };
 
     // things get weird if you have fewer connections than threads

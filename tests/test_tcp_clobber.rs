@@ -10,6 +10,7 @@ use clobber::{tcp, Config, Message, Stats};
 use crossbeam_channel::Receiver;
 
 /// Echo server for testing
+/// todo: Allow tests to pass in an enum to configure how the server behaves. (e.g. Echo vs. static.)
 fn test_server() -> (SocketAddr, Receiver<Stats>) {
     let mut server = romio::TcpListener::bind(&"127.0.0.1:0".parse().unwrap()).unwrap();
     let mut read_buf = [0u8; 128];
@@ -61,8 +62,7 @@ fn get_stats(receiver: Receiver<Stats>) -> Stats {
 
 /// Tests that clobber hits a slow number of requests over a period of time. Precisely hitting
 /// a specified rate is not one of the key design goals of `clobber` so this is really just a
-/// quick sanity test that suggests things are mostly working. (Precise sleeps are platform
-/// dependent, and it can be very expensive to achieve true precision.)
+/// quick sanity test that suggests things are working.
 #[test]
 fn slow() -> std::io::Result<()> {
     let (addr, receiver) = test_server();
@@ -70,11 +70,11 @@ fn slow() -> std::io::Result<()> {
     let config = Config {
         target: addr,
         rate: Some(100),
-        duration: Some(Duration::from_secs(1)),
-        num_threads: 1,
-        connect_timeout: 100,
-        read_timeout: 100,
         connections: 10,
+        num_threads: Some(1),
+        read_timeout: None,
+        connect_timeout: None,
+        duration: Some(Duration::from_secs(1)),
     };
 
     tcp::clobber(config, test_message())?;

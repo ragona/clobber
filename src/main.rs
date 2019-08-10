@@ -106,29 +106,30 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .parse::<u32>()
         .expect("Failed to parse rate");
 
-    let connect_timeout = matches
-        .value_of("connect-timeout")
-        .unwrap_or("0")
-        .parse::<u32>()
-        .expect("Failed to parse connect-timeout");
+    let connect_timeout = match matches.value_of("connect-timeout") {
+        Some(timeout) => {
+            let n: u32 = timeout.parse().expect("Failed to parse connect_timeout");
 
-    let read_timeout = matches
-        .value_of("read-timeout")
-        .unwrap_or("0")
-        .parse::<u32>()
-        .expect("Failed to parse read-timeout");
+            Some(n)
+        }
+        None => None,
+    };
+
+    let read_timeout = match matches.value_of("read-timeout") {
+        Some(timeout) => Some(timeout.parse().expect("Failed to parse read_timeout")),
+        None => None,
+    };
+
+    let num_threads = match matches.value_of("threads") {
+        Some(num_threads) => Some(num_threads.parse::<u32>().expect("Failed to parse threads")),
+        None => None,
+    };
 
     let connections = matches
         .value_of("connections")
         .unwrap_or("500")
         .parse::<u32>()
         .expect("Failed to parse connections");
-
-    let mut num_threads = matches
-        .value_of("threads")
-        .unwrap_or("0")
-        .parse::<u32>()
-        .expect("Failed to parse number of threads");
 
     // todo: move to clobber
     let duration = match matches.value_of("duration") {
@@ -141,9 +142,9 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         n => Some(n),
     };
 
-    if num_threads == 0 {
-        num_threads = num_cpus::get() as u32;
-    }
+    //    if num_threads == 0 {
+    //        num_threads = num_cpus::get() as u32;
+    //    }
 
     Config {
         rate,
