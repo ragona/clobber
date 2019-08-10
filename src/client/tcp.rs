@@ -2,16 +2,15 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use futures::executor::LocalPool;
-use futures::{io};
+use futures::io;
 use futures::prelude::*;
-use futures::task::{SpawnExt};
-use futures_timer::TryFutureExt;
+use futures::task::SpawnExt;
 
 use log::{debug, error, info, warn};
 use romio::TcpStream;
 
-use crate::util;
 use crate::client::Message;
+use crate::util;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Config {
@@ -45,7 +44,7 @@ impl Config {
 ///
 /// If no `rate` is supplied, `clobber` will create `connections` number of async futures,
 /// distribute them across `threads` threads (defaults to num_cpus), and each future will perform
-/// requests in a tigh loop. If there is a rate specified, there will be an optional sleep to stay
+/// requests in a tight loop. If there is a rate specified, there will be an optional sleep to stay
 /// under the requested rate. The futures are driven by a LocalPool executor, and there is no
 /// cross-thread synchronization or communication.
 ///
@@ -72,8 +71,6 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
     };
 
     let start = Instant::now();
-    let read_timeout = Duration::from_millis(config.read_timeout as u64);
-    let connect_timeout = Duration::from_millis(config.connect_timeout as u64);
     let tick = match config.rate {
         Some(rate) => Duration::from_nanos(1e9 as u64 / rate as u64),
         None => Duration::default(),
@@ -87,13 +84,12 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
         let config = config.clone();
         let message = message.clone();
 
-
         // start thread which will contain a chunk of connections
         let thread = std::thread::spawn(move || {
             let mut pool = LocalPool::new();
             let mut spawner = pool.spawner();
 
-            // all connection futures are spawned at runtime
+            // all connection futures are spawned up front
             for i in 0..conns_per_thread {
                 // per-connection clones
                 let message = message.clone();
@@ -106,7 +102,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                             util::sleep(tick * num_threads * i).await;
                         }
 
-                        // connect, write, read loop
+                        // connect, write, read in a tight loop
                         loop {
                             if let Some(duration) = config.duration {
                                 if Instant::now() >= start + duration {
@@ -114,12 +110,17 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                                 }
                             }
 
+                            // A bit of a connundrum here is that these methods are reliant
+                            // on the underlying OS to time out. Your kernel will do that REALLY
+                            // SLOWLY, so if you're reading from a server that doesn't send an
+                            // EOF you're gonna have a bad time. However, explicitly timing out
+                            // futures is expensive to the point that I'm seeing nearly double the
+                            // throughput by not using futures-timer for timeouts.
+                            // todo: add optional timeouts for ill-behaving servers
                             let request_start = Instant::now();
-                            if let Ok(mut stream) =
-                                connect_with_timeout(&addr, connect_timeout).await
-                            {
+                            if let Ok(mut stream) = connect(&addr).await {
                                 if let Ok(_) = write(&mut stream, &message.body).await {
-                                    read_with_timeout(&mut stream, read_timeout).await.ok();
+                                    read(&mut stream).await.ok();
                                 }
                             }
 
@@ -154,8 +155,8 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
     Ok(())
 }
 
-async fn connect_with_timeout(addr: &SocketAddr, timeout: Duration) -> io::Result<TcpStream> {
-    match TcpStream::connect(&addr).timeout(timeout).await {
+async fn connect(addr: &SocketAddr) -> io::Result<TcpStream> {
+    match TcpStream::connect(&addr).await {
         Ok(stream) => {
             debug!("connected to {}", &addr);
             Ok(stream)
@@ -183,9 +184,9 @@ async fn write(stream: &mut TcpStream, buf: &[u8]) -> io::Result<usize> {
     }
 }
 
-async fn read_with_timeout(stream: &mut TcpStream, timeout: Duration) -> io::Result<usize> {
+async fn read(stream: &mut TcpStream) -> io::Result<usize> {
     let mut read_buffer = vec![]; // todo: size?
-    match stream.read_to_end(&mut read_buffer).timeout(timeout).await {
+    match stream.read_to_end(&mut read_buffer).await {
         Ok(_) => {
             let n = read_buffer.len();
             debug!("{} bytes read ", n);

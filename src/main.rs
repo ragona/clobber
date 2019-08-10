@@ -109,13 +109,13 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
 
     let connect_timeout = matches
         .value_of("connect-timeout")
-        .unwrap_or("500")
+        .unwrap_or("0")
         .parse::<u32>()
         .expect("Failed to parse connect-timeout");
 
     let read_timeout = matches
         .value_of("read-timeout")
-        .unwrap_or("500")
+        .unwrap_or("0")
         .parse::<u32>()
         .expect("Failed to parse read-timeout");
 
@@ -152,8 +152,8 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         duration,
         connections,
         num_threads,
-        read_timeout,
-        connect_timeout,
+        read_timeout,    // todo make this optional
+        connect_timeout, // todo make this optional
     }
 }
 

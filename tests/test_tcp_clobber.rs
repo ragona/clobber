@@ -1,12 +1,12 @@
 #![feature(async_await)]
 
-use std::time::Duration;
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use futures::executor;
 use futures::prelude::*;
 
-use clobber::client::{self, Message, Stats, Config};
+use clobber::client::{self, Config, Message, Stats};
 use crossbeam_channel::Receiver;
 
 /// Echo server for testing
@@ -29,6 +29,7 @@ fn test_server() -> (SocketAddr, Receiver<Stats>) {
                             stream.read(&mut read_buf).await.unwrap();
                             stats.bytes_read += read_buf.len();
                             stream.write(&read_buf).await.unwrap();
+                            stats.bytes_written += read_buf.len();
                             stream.close().await.unwrap();
 
                             tx.send(stats).unwrap();
@@ -46,9 +47,7 @@ fn test_server() -> (SocketAddr, Receiver<Stats>) {
 }
 
 fn test_message() -> Message {
-    Message::new(
-        b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec()
-    )
+    Message::new(b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec())
 }
 
 fn get_stats(receiver: Receiver<Stats>) -> Stats {
@@ -60,27 +59,33 @@ fn get_stats(receiver: Receiver<Stats>) -> Stats {
     stats
 }
 
+/// Tests that clobber hits a slow number of requests over a period of time. Precisely hitting
+/// a specified rate is not one of the key design goals of `clobber` so this is really just a
+/// quick sanity test that suggests things are mostly working. (Precise sleeps are platform
+/// dependent, and it can be very expensive to achieve true precision.)
 #[test]
 fn slow() -> std::io::Result<()> {
     let (addr, receiver) = test_server();
+
     let config = Config {
         target: addr,
-        rate: Some(10),
-        duration: Some(Duration::from_secs(3)),
-        num_threads: 0,
+        rate: Some(100),
+        duration: Some(Duration::from_secs(1)),
+        num_threads: 1,
         connect_timeout: 100,
         read_timeout: 100,
-        connections: 2,
+        connections: 10,
     };
 
     client::tcp::clobber(config, test_message())?;
 
     let stats = get_stats(receiver);
+    let rate = config.rate.unwrap();
     let wanted_duration = config.duration.unwrap().as_secs();
     let actual_duration = (stats.end_time - stats.start_time).as_secs();
 
     assert_eq!(actual_duration, wanted_duration);
-    assert_eq!(config.rate.unwrap() * config.duration.unwrap().as_secs() as u32, stats.connections as u32);
+    assert_eq!(rate * wanted_duration as u32, stats.connections as u32);
 
     Ok(())
 }

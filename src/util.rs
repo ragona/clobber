@@ -1,7 +1,6 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 
-use futures::prelude::*;
 use futures_timer::Delay;
 
 use rand::Rng;
@@ -19,5 +18,5 @@ pub fn random_ipv4_addr(port: u16) -> SocketAddr {
 }
 
 pub async fn sleep(duration: Duration) {
-    Delay::new(duration).map(|_| {}).await
+    Delay::new(duration).await.unwrap();
 }
