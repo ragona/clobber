@@ -1,3 +1,8 @@
+//! # Main binary for `clobber`.
+//!
+//! Should be limited to CLI interaction; business logic is mostly in the `tcp::clobber` method.
+//!
+
 #![feature(async_await)]
 
 extern crate clobber;
@@ -136,10 +141,6 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         0 => None,
         n => Some(n),
     };
-
-    //    if num_threads == 0 {
-    //        num_threads = num_cpus::get() as u32;
-    //    }
 
     Config {
         rate,

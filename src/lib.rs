@@ -1,12 +1,12 @@
-//! Tool for TCP load testing
+//! # Tool for TCP load testing
 //!
 //! The primary goal for `clobber` is speed; we want to make TCP requests as fast as possible.
 //!
-//! This library is used by the main.rs binary and the tests.
+//! This library is used internally by the main.rs binary and the tests, and is not intended for
+//! general use in other projects. (But if you're interested, post an issue; I'd be happy to hear
+//! about it!)
 //!
-//! # Examples
-//!
-//! ## A single thread
+//! ## Examples
 //!
 //! ```no_run
 //! # use std::time::Duration;
@@ -18,6 +18,7 @@
 //!
 //! tcp::clobber(config, message).unwrap();
 //! ```
+//!
 
 #![feature(async_await)]
 
@@ -28,6 +29,10 @@ pub mod util;
 pub use stats::Stats;
 pub use tcp::Config;
 
+/// Message payload
+///
+/// todo: Long-term goal; provide APIs for each connection to mutate its message.
+///
 #[derive(Debug, Clone)]
 pub struct Message {
     pub body: Vec<u8>,
