@@ -1,7 +1,7 @@
 # clobber
 
 `clobber` is a simple TCP load testing tool, written in Rust. It uses the `async/await` syntax, which currently
-requires the nightly branch, but is targeted to stabilize in the 1.38 release. This project was created as a way to
+requires the nightly branch, but is targeted to stabilize in the `1.38` release. This project was created as a way to
 kick the tires of the new syntax, since a network I/O heavy tool is a great use case for an async concurrency model.
 
 ## Usage
@@ -41,7 +41,7 @@ that's the best we can do.
 <details>
 <summary>Strategies to improve throughput</summary>
 
-### Thread local
+#### - Thread local
 
 This library uses no cross-thread communication via `std::sync` or `crossbeam`.
 All futures are executed on a `LocalPool`, and the number of OS threads used is configurable.
@@ -54,7 +54,7 @@ Note: This is currently violated by the way this library accomplishes rate limit
 relies on a global thread that manages timers. This ends up putting disproportionate load
 on that thread at some point which impacts performance.
 
-### Limit open ports and files
+#### - Limit open ports and files
 
 Two of the key limiting factors for high TCP client throughput are running out of ports,
 or opening more files than the underlying OS will allow. `clobber` tries to minimize issues
