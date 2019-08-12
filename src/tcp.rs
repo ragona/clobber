@@ -2,58 +2,7 @@
 //!
 //! This file contains the bulk of the business logic for `clobber`.
 //!
-//! ## Goals
-//!
-//! ### 1. Speed
-//!
-//! Generating enough load to test large distributable services can require a
-//! cost-prohibitive number of hosts to send requests. I wanted to try to make a tool that
-//! prioritized speed. This requires some tradeoffs, such as not precisely controlling the rate
-//! of requests. We can get this mostly correct, but without communication between threads
-//! that's the best we can do.
-//!
-//! #### Strategies to improve throughput
-//!
-//! ##### Thread local
-//!
-//! This library uses no cross-thread communication via `std::sync` or `crossbeam`.
-//! All futures are executed on a `LocalPool`, and the number of OS threads used is configurable.
-//! Work-stealing has an overhead that isn't suitable for this kind of use case. This has a
-//! number of design impacts. For example, it becomes more difficult to aggregate what each
-//! connection is doing. This is simple if you just pass the results to a channel, but this
-//! has a non-trivial impact on performance.
-//!
-//! Note: This is currently violated by the way this library accomplishes rate limiting, which
-//! relies on a global thread that manages timers. This ends up putting disproportionate load
-//! on that thread at some point which impacts performance.
-//!
-//! ##### Limit open ports and files
-//!
-//! Two of the key limiting factors for high TCP client throughput are running out of ports,
-//! or opening more files than the underlying OS will allow. `clobber` tries to minimize issues
-//! here by giving users control over the max connections. It's also a good idea to check out
-//! your specific `ulimit -n` settings and raise the max number of open files.
-//!
-//! ### 2. Async/Await
-//!
-//! A high-throughput network client is a classic example of an application that
-//! is suitable for an async concurrency model. This is possible with tools like `tokio` and
-//! `hyper`, but they currently use a futures model that requires a somewhat non-ergonomic
-//! coding style with a tricky learning curve.
-//!
-//! At the time of this writing, Rust's async/await syntax is not quite stable, but it
-//! is available on the nightly branch. The new syntax is a huge improvement in readability
-//! over the current Futures-based concurrency model. When async/await is moved to the stable
-//! branch in version 1.38 this library will move to the stable branch as well.
-//!
-//! ### 3. Simple and Readable Code
-//!
-//! One of the key benefits of async/await is a more readable and ergonomic codebase. A goal
-//! of mine for this project was to try to learn readable Rust idioms and create a simple
-//! tool that would act as a relatively easy to understand example. This has some conflicts
-//! with maximum speed -- for example, just using a multithreaded executor like `juliex` would
-//! produce a simpler library. These kinds of tradeoffs are handled on a case by case basis.
-//!
+
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
