@@ -51,12 +51,14 @@ This library uses no cross-thread communication via `std::sync` or `crossbeam`. 
 
 It can be a lot of work setting up a load test. `clobber` aims to simply throw a lot of traffic at a host, and much of the time that's all you need. If you need more configuration check out the examples.  
 
-## Tips: Tuning TCP for maximum performance
+## Tips: Tuning and Troubleshooting TCP Performance
+
+There are a couple of small tweaks you can do to the client host to enable much higher throughput. 
 
 ### 1. File/port limits
 
 A common cause of TCP throughput issues is number of open files. You can check this with `ulimit -n`. If you're seeing
-issues with number of open files you can raise this limit  with `ulimit` and by editing the `/etc/security/limits.conf`
+issues with number of open files you can raise this limit with `ulimit`, and by editing the `/etc/security/limits.conf`
 file. If you're running into too many open ports you have fewer options, but should consider reducing the number of
 max connections.
 
