@@ -1,8 +1,12 @@
 # clobber
 
-`clobber` is a simple TCP load testing tool, written in Rust. It uses the `async/await` syntax, which currently
-requires the nightly branch, but is targeted to stabilize in the `1.38` release. This project was created as a way to
-kick the tires of the new syntax, since a network I/O heavy tool is a great use case for an async concurrency model.
+`clobber` is a simple TCP load testing tool, written in Rust. It uses the `async/await` syntax, which currently requires the nightly branch, but is targeted to stabilize in the `1.38` release. This project was created as a way to kick the tires of the new syntax, since a network I/O heavy tool is a great use case for an async concurrency model.
+
+## Example
+
+```
+echo "GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n" | clobber --target=0.0.0.0:8000
+```
 
 ## Usage
 ```
@@ -28,79 +32,26 @@ OPTIONS:
 
 ```
 
-## Goals
+## Design Goals
 
-### 1. High throughput
+### 1. Fast
 
-Generating enough load to test large distributable services can require a
-cost-prohibitive number of hosts to send requests. I wanted to try to make a tool that
-prioritized performance. This requires some tradeoffs, such as not precisely controlling the rate
-of requests. We can get this mostly correct, but without communication between threads
-that's the best we can do.
-
-<details>
-<summary>Strategies to improve throughput</summary>
-
-#### - Thread local
-
-This library uses no cross-thread communication via `std::sync` or `crossbeam`.
-All futures are executed on a `LocalPool`, and the number of OS threads used is configurable.
-Work-stealing has an overhead that isn't suitable for this kind of use case. This has a
-number of design impacts. For example, it becomes more difficult to aggregate what each
-connection is doing. This is simple if you just pass the results to a channel, but this
-has a non-trivial impact on performance.
-
-Note: This is currently violated by the way this library accomplishes rate limiting, which
-relies on a global thread that manages timers. This ends up putting disproportionate load
-on that thread at some point which impacts performance.
+A more efficient TCP client means fewer hosts required to perform a load test. Faster is better for this tool. We use a couple of strategies to try to keep traffic flowing. 
 
 #### - Limit open ports and files
 
-Two of the key limiting factors for high TCP client throughput are running out of ports,
-or opening more files than the underlying OS will allow. `clobber` tries to minimize issues
-here by giving users control over the max connections. It's also a good idea to check out
-your specific `ulimit -n` settings and raise the max number of open files.
-</details>
+Two of the key limiting factors for high TCP client throughput are running out of ports, or opening more files than the underlying OS will allow. `clobber` tries to minimize issues here by giving users control over the max connections. (It's also a good idea to check out your specific `ulimit -n` settings and raise the max number of open files.)
 
-### 2. Async/Await
+#### - No cross-thread communication 
+This library uses no cross-thread communication via `std::sync` or `crossbeam`. All futures are executed on a `LocalPool`, and the number of OS threads used is user configurable. This has a number of design impacts. For example, it becomes more difficult to aggregate what each connection is doing. This is simple if you just pass the results to a channel, but this has a non-trivial impact on performance.
 
-A high-throughput network client is a classic example of an application that
-is suitable for an async concurrency model. This is possible with tools like `tokio` and
-`hyper`, but they currently use a futures model that requires a somewhat non-ergonomic
-coding style with a tricky learning curve.
+*Note: This is currently violated by the way we accomplish rate limiting, which relies on a global thread that manages timers. This ends up putting disproportionate load on that thread at some point. But if you're relying on rate limiting you're trying to slow it down, so we're putting that in the 'feature' column. (If anyone would like to contribute a thread-local futures timer it'd be a great contribution to the Rust community!*)
 
-At the time of this writing, Rust's async/await syntax is not quite stable, but it
-is available on the nightly branch. The new syntax is a huge improvement in readability
-over the current Futures-based concurrency model. When async/await is moved to the stable
-branch in version 1.38 this library will move to the stable branch as well.
+### 2. Easy to use 
 
-### 3. Simple and Readable Code
+It can be a lot of work setting up a load test. `clobber` aims to simply throw a lot of traffic at a host, and much of the time that's all you need. If you need more configuration check out the examples.  
 
-One of the key benefits of async/await is a more readable and ergonomic codebase. A goal
-of mine for this project was to try to learn readable Rust idioms and create a simple
-tool that would act as a relatively easy to understand example. This has some conflicts
-with maximum speed -- for example, just using a multithreaded executor like `juliex` would
-produce a simpler library. These kinds of tradeoffs are handled on a case by case basis.
-
-
-## Examples
-Send an http request through with default settings. Defaults to no rate limit, no timeouts, `threads` to
-`num_cores`, and `connections` to 100.
-```
-cat tests/GET | clobber --target=0.0.0.0:8000
-```
-
-Set a specific duration
-```
-cat tests/GET | clobber -t 0.0.0.0:8000 -d 2m30s
-```
-
-Tweak threads and max connections:
-```
-cat tests/GET | clobber --target=0.0.0.0:8000 --threads=4 --connections=10000
-```
-
-## Tuning TCP for maximum performance
+## Tips: Tuning TCP for maximum performance
 
 ### 1. File/port limits
 
@@ -122,7 +73,7 @@ Knowing when to stop reading from a TCP stream is tricky if you don't know how m
 protocol dependent, and `clobber` has no idea. If the server doesn't send an `EOF` you can get stuck waiting for more
 data for a long time, and this can block connections. With some protocols, such as HTTP, you can send a header like
 `Connection: close` that signals to the host that you won't be sending any more requests, and that they should send
-an `EOF` after they've responded. This can be important for achieving good throughput. If this isn't possible you
+an `EOF` after they've responded. This can fix throughput issues against some HTTP servers. If this isn't possible you
 should configure the `read-timeout`, but this does have a bit of an impact on performance (especially with a high
 number of connections.)
 
