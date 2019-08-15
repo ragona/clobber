@@ -46,6 +46,8 @@ pub struct Config {
     /// that isn't sending EOF bytes or otherwise isn't dropping connections, this can be
     /// essential to maintaing a high(ish) throughput, at the cost of more CPU load.
     pub read_timeout: Option<u32>,
+    /// Absolute number of requests to be made. Should split evenly across threads.
+    pub limit: Option<u32>,
 }
 
 impl Config {
@@ -55,6 +57,7 @@ impl Config {
             target,
             connections,
             rate: None,
+            limit: None,
             duration: None,
             num_threads: None,
             read_timeout: None,
@@ -89,6 +92,11 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
         n => n,
     };
 
+    let limit_per_conn = match config.limit {
+        None => None,
+        Some(n) => Some(n / config.connections),
+    };
+
     let start = Instant::now();
     let tick = match config.rate {
         Some(rate) => Duration::from_nanos(1e9 as u64 / rate as u64),
@@ -116,11 +124,23 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 
                 spawner
                     .spawn(async move {
+                        // spread out loop start times within a thread to smoothly match rate
+                        if config.rate.is_some() {
+                            Delay::new(tick * num_threads * i).await.unwrap();
+                        }
+
                         // connect, write, read
+                        let mut count = 0;
                         loop {
                             if let Some(duration) = config.duration {
                                 if Instant::now() >= start + duration {
-                                    break;
+                                    break
+                                }
+                            }
+
+                            if let Some(limit) = limit_per_conn {
+                                if count >= limit {
+                                    break
                                 }
                             }
 
@@ -147,6 +167,8 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                                     warn!("running behind; consider adding more connections");
                                 }
                             }
+
+                            count += 1;
                         }
                     })
                     .unwrap();
@@ -154,7 +176,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
             pool.run();
         });
         threads.push(thread);
-        std::thread::sleep(tick); // stagger the start of each thread by a single tick
+        std::thread::sleep(tick / 2); // stagger the start of each thread by a single tick
     }
     for handle in threads {
         handle.join().unwrap();

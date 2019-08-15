@@ -60,14 +60,19 @@ fn get_stats(receiver: Receiver<Stats>) -> Stats {
     stats
 }
 
-/// Tests that clobber hits a slow number of requests over a period of time. Precisely hitting
-/// a specified rate is not one of the key design goals of `clobber` so this is really just a
-/// quick sanity test that suggests things are working.
-/// let addr: SocketAddr = "0.0.0.0:8000".parse().unwrap();
 #[test]
-fn slow() -> std::io::Result<()> {
+fn single_thread_timed() -> std::io::Result<()> {
     let (addr, receiver) = test_server();
-    let config = Config::new(addr, 100);
+    let config = Config {
+        target: addr,
+        connections: 1,
+        rate: Some(10),
+        duration: Some(Duration::from_secs(1)),
+        num_threads: None,
+        connect_timeout: None,
+        read_timeout: None,
+        limit: None
+    };
 
     tcp::clobber(config, test_message())?;
 
@@ -78,6 +83,30 @@ fn slow() -> std::io::Result<()> {
 
     assert_eq!(actual_duration, wanted_duration);
     assert_eq!(rate * wanted_duration as u32, stats.connections as u32);
+
+    Ok(())
+}
+
+#[test]
+fn single_thread_limited() -> std::io::Result<()> {
+    let (addr, receiver) = test_server();
+    let config = Config {
+        target: addr,
+        connections: 10,
+        rate: Some(10),
+        limit: Some(20),
+        duration: None,
+        num_threads: Some(1),
+        connect_timeout: None,
+        read_timeout: None,
+    };
+
+    tcp::clobber(config, test_message())?;
+
+    let stats = get_stats(receiver);
+    let total = config.limit.unwrap();
+
+    assert_eq!(total, stats.connections as u32);
 
     Ok(())
 }

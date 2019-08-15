@@ -96,6 +96,13 @@ fn cli() -> App<'static, 'static> {
                 .help("Timeout for reading response from target")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("limit")
+                .short("l")
+                .long("limit")
+                .help("Total number of requests")
+                .takes_value(true),
+        )
 }
 
 fn settings_from_argmatches(matches: &ArgMatches) -> Config {
@@ -110,6 +117,12 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .unwrap_or("0")
         .parse::<u32>()
         .expect("Failed to parse rate");
+
+    let limit = matches
+        .value_of("limit")
+        .unwrap_or("0")
+        .parse::<u32>()
+        .expect("Failed to parse limit");
 
     let connections = matches
         .value_of("connections")
@@ -137,6 +150,11 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         None => None,
     };
 
+    let limit = match limit {
+        0 => None,
+        n => Some(n),
+    };
+
     let rate = match rate {
         0 => None,
         n => Some(n),
@@ -144,6 +162,7 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
 
     Config {
         rate,
+        limit,
         target,
         duration,
         connections,
