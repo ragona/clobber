@@ -1,6 +1,6 @@
 # clobber
 
-`clobber` is a simple TCP load testing tool, written in Rust. It uses the `async/await` syntax, which currently requires the nightly branch, but is targeted to stabilize in the `1.38` release. This project was created as a way to kick the tires of the new syntax, since a network I/O heavy tool is a great use case for an async concurrency model.
+`clobber` is a simple TCP load testing tool written in Rust. It uses the `async/await` syntax, which currently requires the nightly branch, but is targeted to stabilize in the `1.38` release. This project was created as a way to kick the tires of the new syntax, since a network I/O heavy tool is a great use case for an async concurrency model.
 
 ## Example
 
@@ -25,6 +25,7 @@ OPTIONS:
         --connect-timeout <connect-timeout>    Timeout for initial TCP syn timeout
     -c, --connections <connections>            Max number of open connections at any given time
     -d, --duration <duration>                  Length of the run (e.g. 5s, 10m, 2h, etc...)
+    -l, --limit <limit>                        Total number of requests
         --rate <rate>                          Limit to a particular rate per-second.
         --read-timeout <read-timeout>          Timeout for reading response from target
     -t, --target <target>                      Host to clobber
