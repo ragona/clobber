@@ -116,11 +116,6 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 
                 spawner
                     .spawn(async move {
-                        // spread out loop start times within a thread to smoothly match rate
-                        if config.rate.is_some() {
-                            Delay::new(tick * num_threads * i).await.unwrap();
-                        }
-
                         // connect, write, read
                         loop {
                             if let Some(duration) = config.duration {

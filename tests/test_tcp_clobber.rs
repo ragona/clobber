@@ -63,19 +63,11 @@ fn get_stats(receiver: Receiver<Stats>) -> Stats {
 /// Tests that clobber hits a slow number of requests over a period of time. Precisely hitting
 /// a specified rate is not one of the key design goals of `clobber` so this is really just a
 /// quick sanity test that suggests things are working.
+/// let addr: SocketAddr = "0.0.0.0:8000".parse().unwrap();
 #[test]
 fn slow() -> std::io::Result<()> {
     let (addr, receiver) = test_server();
-
-    let config = Config {
-        target: addr,
-        rate: Some(100),
-        connections: 10,
-        num_threads: Some(1),
-        read_timeout: None,
-        connect_timeout: None,
-        duration: Some(Duration::from_secs(1)),
-    };
+    let config = Config::new(addr, 100);
 
     tcp::clobber(config, test_message())?;
 
