@@ -41,6 +41,7 @@ use log::{debug, error, info, warn};
 use romio::TcpStream;
 
 use crate::{Message, Config};
+use futures::io::ErrorKind;
 
 
 /// This function's goal is to make as many TCP requests as possible. Two common blockers
@@ -110,13 +111,15 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 /// start over and reconnect. If it does not successfully read, it will block until the underlying
 /// TCP read fails unless `read-timeout` is configured.
 ///
-/// todo: This ignores
+/// todo: This ignores timeouts. Plz fix.
 async fn connection(message: Message, config:Config) -> io::Result<()> {
     let start = Instant::now();
 
     let mut count = 0;
-    let mut loop_complete = move || {
-        count += 1;
+    let mut loop_complete = move |success: bool| {
+        if success {
+            count += 1;
+        }
 
         if let Some(duration) = config.duration {
             if Instant::now() >= start + duration {
@@ -125,7 +128,7 @@ async fn connection(message: Message, config:Config) -> io::Result<()> {
         }
 
         if let Some(limit) = config.limit_per_connection(){
-            if count > limit {
+            if count >= limit {
                 return true
             }
         }
@@ -133,7 +136,7 @@ async fn connection(message: Message, config:Config) -> io::Result<()> {
         false
     };
 
-    while !loop_complete() {
+    while !loop_complete(false) {
         let request_start = Instant::now();
         // A bit of a connundrum here is that these methods are reliant
         // on the underlying OS to time out. Your kernel will do that REALLY
@@ -141,10 +144,25 @@ async fn connection(message: Message, config:Config) -> io::Result<()> {
         // EOF you're gonna have a bad time. However, explicitly timing out
         // futures is expensive to the point that I'm seeing nearly double the
         // throughput by not using futures-timer for timeouts.
-        // todo: add optional timeouts for ill-behaving servers
+        // todo: add optional timeouts back
         if let Ok(mut stream) = connect(&config.target).await {
-            if let Ok(_) = write(&mut stream, &message.body).await {
-                read(&mut stream).await.ok();
+            if config.repeat {
+                loop {
+                    match write_and_read(&mut stream, &message).await {
+                        Ok(_) => {
+                            if loop_complete(true) {
+                                break;
+                            }
+                        }
+                        Err(_) => {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                if write_and_read(&mut stream, &message).await.is_ok() {
+                    loop_complete(true);
+                }
             }
         }
 
@@ -159,6 +177,24 @@ async fn connection(message: Message, config:Config) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+async fn write_and_read(mut stream: &mut TcpStream, message: &Message) -> io::Result<()> {
+    match write(&mut stream, &message.body).await {
+        Ok(_) => {
+            match read(&mut stream).await {
+                Ok(0) | Err (_) => {
+                    Err(io::Error::new(ErrorKind::Other, "fail"))
+                }
+                Ok(_) => {
+                    Ok(())
+                }
+            }
+        },
+        Err(e) => {
+            Err(e)
+        }
+    }
 }
 
 /// Connects to the provided address, logs any errors and returns errors encountered.

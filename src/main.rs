@@ -14,9 +14,8 @@ use std::time::Duration;
 
 use clap::{App, Arg, ArgMatches};
 use humantime;
-use log::LevelFilter;
 
-use clobber::{tcp, Config, Message};
+use clobber::{setup_logger, tcp, Config, Message};
 
 fn main() {
     let cli = cli();
@@ -103,6 +102,11 @@ fn cli() -> App<'static, 'static> {
                 .help("Total number of requests")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("repeat")
+                .long("repeat")
+                .help("Reuses connections to send the message repeatedly (keepalive)"),
+        )
 }
 
 fn settings_from_argmatches(matches: &ArgMatches) -> Config {
@@ -129,6 +133,8 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .unwrap_or("100")
         .parse::<u32>()
         .expect("Failed to parse connections");
+
+    let repeat = matches.is_present("repeat");
 
     let connect_timeout = match matches.value_of("connect-timeout") {
         Some(timeout) => Some(timeout.parse().expect("Failed to parse connect_timeout")),
@@ -163,33 +169,14 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
     Config {
         rate,
         limit,
+        repeat,
         target,
         duration,
         connections,
-        repeat: false,
-        threads: num_threads,
         read_timeout,
         connect_timeout,
+        threads: num_threads,
     }
-}
-
-pub fn setup_logger(log_level: LevelFilter) -> Result<(), Box<dyn std::error::Error>> {
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{}[{}][{}] {}",
-                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
-                record.target(),
-                record.level(),
-                message
-            ))
-        })
-        .level(log_level)
-        .chain(std::io::stdout())
-        .chain(fern::log_file("clobber.log")?)
-        .apply()?;
-
-    Ok(())
 }
 
 /// This is a bit of a weird way to do this, but I'm not sure what the better option is.

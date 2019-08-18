@@ -16,7 +16,7 @@
 //! let message = Message::new(b"GET / HTTP/1.1\r\nHost: localhost:8000\r\nConnection: close\r\n\r\n".to_vec());
 //! let config = ConfigBuilder::new(addr)
 //!     .connections(10)
-//!     .consume();
+//!     .build();
 //!
 //! tcp::clobber(config, message).unwrap();
 //! ```
@@ -32,6 +32,9 @@ pub mod util;
 pub use config::{Config, ConfigBuilder};
 pub use stats::Stats;
 
+use fern;
+use log::LevelFilter;
+
 /// Message payload
 ///
 /// todo: Long-term goal; provide APIs for each connection to mutate its message.
@@ -45,4 +48,23 @@ impl Message {
     pub fn new(body: Vec<u8>) -> Message {
         Message { body }
     }
+}
+
+pub fn setup_logger(log_level: LevelFilter) -> Result<(), Box<dyn std::error::Error>> {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "{}[{}][{}] {}",
+                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
+        .level(log_level)
+        .chain(std::io::stdout())
+        .chain(fern::log_file("clobber.log")?)
+        .apply()?;
+
+    Ok(())
 }

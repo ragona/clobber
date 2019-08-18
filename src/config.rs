@@ -1,5 +1,3 @@
-extern crate proc_macro;
-
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -104,7 +102,8 @@ impl ConfigBuilder {
         }
     }
 
-    pub fn consume(self) -> Config {
+    /// Consume the builder and return the inner object
+    pub fn build(self) -> Config {
         self.config
     }
 

@@ -1,12 +1,11 @@
 #![feature(async_await)]
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use futures::executor;
 use futures::prelude::*;
 
-use clobber::{tcp, Config, Message, Stats, ConfigBuilder};
+use clobber::{tcp, Message, Stats, ConfigBuilder};
 use crossbeam_channel::Receiver;
 
 /// Echo server for testing
@@ -69,7 +68,7 @@ fn single_thread_limited_rate_and_total() -> std::io::Result<()> {
         .rate(Some(10))
         .limit(Some(20))
         .threads(Some(1))
-        .consume();
+        .build();
 
     tcp::clobber(config, test_message())?;
 
@@ -90,7 +89,27 @@ fn multi_thread_limited_rate_and_total() -> std::io::Result<()> {
         .limit(Some(20))
         .connections(10)
         .threads(Some(2))
-        .consume();
+        .build();
+
+    tcp::clobber(config, test_message())?;
+
+    let stats = get_stats(receiver);
+    let total = config.limit.unwrap();
+
+    assert_eq!(total, stats.connections as u32);
+
+    Ok(())
+}
+
+#[test]
+fn repeat_mode() -> std::io::Result<()> {
+    let (addr, receiver) = test_server();
+    let config = ConfigBuilder::new(addr)
+        .limit(Some(30))
+        .connections(1)
+        .threads(Some(1))
+        .repeat(true)
+        .build();
 
     tcp::clobber(config, test_message())?;
 
