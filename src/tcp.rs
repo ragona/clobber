@@ -2,6 +2,28 @@
 //!
 //! This file contains the bulk of the business logic for `clobber`.
 //!
+//! ## Performance Notes
+//!
+//! ### - Limit open ports and files
+//!
+//! Two of the key limiting factors for high TCP client throughput are running out of ports, or
+//! opening more files than the underlying OS will allow. `clobber` tries to minimize issues here
+//! by giving users control over the max connections. (It's also a good idea to check out your
+//! specific `ulimit -n` settings and raise the max number of open files.)
+//!
+//! #### - Avoid cross-thread communication
+//! This library uses no cross-thread communication via `std::sync` or `crossbeam`. All futures
+//! are executed on a `LocalPool`, and the number of OS threads used is user configurable. This
+//! has a number of design impacts. For example, it becomes more difficult to aggregate what each
+//! connection is doing. This is simple if you just pass the results to a channel, but this has a
+//! non-trivial impact on performance.
+//!
+//! *Note: This is currently violated by the way we accomplish rate limiting, which relies on a
+//! global thread that manages timers. This ends up putting disproportionate load on that thread at
+//! some point. But if you're relying on rate limiting you're trying to slow it down, so we're
+//! putting this in the 'feature' column. (If anyone would like to contribute a thread-local
+//! futures timer it'd be a great contribution to the Rust community!*)
+//!
 
 
 use std::net::SocketAddr;
