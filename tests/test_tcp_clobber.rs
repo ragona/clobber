@@ -6,7 +6,7 @@ use std::time::Duration;
 use futures::executor;
 use futures::prelude::*;
 
-use clobber::{tcp, Config, Message, Stats};
+use clobber::{tcp, Config, Message, Stats, ConfigBuilder};
 use crossbeam_channel::Receiver;
 
 /// Echo server for testing
@@ -63,16 +63,13 @@ fn get_stats(receiver: Receiver<Stats>) -> Stats {
 #[test]
 fn single_thread_limited_rate_and_total() -> std::io::Result<()> {
     let (addr, receiver) = test_server();
-    let config = Config {
-        target: addr,
-        connections: 10,
-        rate: Some(10),
-        limit: Some(20),
-        duration: None,
-        threads: Some(1),
-        connect_timeout: None,
-        read_timeout: None,
-    };
+
+    let config = ConfigBuilder::new(addr)
+        .connections(10)
+        .rate(Some(10))
+        .limit(Some(20))
+        .threads(Some(1))
+        .consume();
 
     tcp::clobber(config, test_message())?;
 
@@ -87,16 +84,13 @@ fn single_thread_limited_rate_and_total() -> std::io::Result<()> {
 #[test]
 fn multi_thread_limited_rate_and_total() -> std::io::Result<()> {
     let (addr, receiver) = test_server();
-    let config = Config {
-        target: addr,
-        connections: 10,
-        rate: Some(10),
-        limit: Some(20),
-        duration: None,
-        threads: Some(2),
-        connect_timeout: None,
-        read_timeout: None,
-    };
+
+    let config = ConfigBuilder::new(addr)
+        .rate(Some(10))
+        .limit(Some(20))
+        .connections(10)
+        .threads(Some(2))
+        .consume();
 
     tcp::clobber(config, test_message())?;
 

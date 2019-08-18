@@ -4,20 +4,16 @@
 //! and then read. If the client is in repeat mode then it will repeatedly write/read while the
 //! connection is open.
 //!
-//! ## Implementation notes
-//!
-//! `clobber`
-//!
 //! ## Performance Notes
 //!
-//! ### - Limit open ports and files
+//! ### Limit open ports and files
 //!
 //! Two of the key limiting factors for high TCP client throughput are running out of ports, or
 //! opening more files than the underlying OS will allow. `clobber` tries to minimize issues here
 //! by giving users control over the max connections. (It's also a good idea to check out your
 //! specific `ulimit -n` settings and raise the max number of open files.)
 //!
-//! #### - Avoid cross-thread communication
+//! #### Avoid cross-thread communication
 //! This library uses no cross-thread communication via `std::sync` or `crossbeam`. All futures
 //! are executed on a `LocalPool`, and the number of OS threads used is user configurable. This
 //! has a number of design impacts. For example, it becomes more difficult to aggregate what each
@@ -39,97 +35,13 @@ use futures::executor::LocalPool;
 use futures::io;
 use futures::prelude::*;
 use futures::task::SpawnExt;
+use futures_timer::Delay;
 
 use log::{debug, error, info, warn};
 use romio::TcpStream;
 
-use crate::Message;
-use futures_timer::Delay;
+use crate::{Message, Config};
 
-/// Settings for the load test
-///
-/// todo: Make write/read optional. (Enum?)
-///
-#[derive(Debug, Copy, Clone)]
-pub struct Config {
-    /// Socket address (ip and port) of the host we'll be calling
-    pub target: SocketAddr,
-    /// Connections is the a key knob to turn when tuning a performance test. Honestly
-    /// 'connections' isn't the best name; it implies a certain persistance that
-    pub connections: u32,
-    /// Optional rate-limiting. Precisely timing high rates is unreliable; if you're
-    /// seeing slower than expected performance try running with no rate limit at all.
-    pub rate: Option<u32>,
-    /// Optional duration. If duration is None, clobber will run indefinitely.
-    pub duration: Option<Duration>,
-    /// Number of OS threads to distribute work between. 0 becomes num_cpus.
-    pub threads: Option<u32>,
-    /// Optionally time out requests at a number of milliseconds. Note: checking timeouts
-    /// costs CPU cycles; max performance will suffer. However, if you have an ill-behaving
-    /// server that isn't connecting consistently and is hanging onto connections, this can
-    /// improve the situation.
-    pub connect_timeout: Option<u32>,
-    /// Optionally time out read requests at a number of milliseconds. Note: checking timeouts
-    /// costs CPU cycles; max performance will suffer. However, if you have an ill-behaving server
-    /// that isn't sending EOF bytes or otherwise isn't dropping connections, this can be
-    /// essential to maintaing a high(ish) throughput, at the cost of more CPU load.
-    pub read_timeout: Option<u32>,
-    /// Absolute number of requests to be made. Should split evenly across threads.
-    pub limit: Option<u32>,
-}
-
-impl Config {
-    // todo: builder pattern
-    pub fn new(target: SocketAddr, connections: u32) -> Config {
-        Config {
-            target,
-            connections,
-            rate: None,
-            limit: None,
-            duration: None,
-            threads: None,
-            read_timeout: None,
-            connect_timeout: None,
-        }
-    }
-
-    /// Number of user-defined threads, or all the threads on the host.
-    pub fn num_threads(&self) -> u32 {
-        match self.threads {
-            None => num_cpus::get() as u32,
-            Some(n) => n,
-        }
-    }
-
-    /// Number of connection loops each thread should maintain. Will never be less than the number
-    /// of threads.
-    pub fn connections_per_thread(&self) -> u32 {
-        match self.connections / self.num_threads() as u32 {
-            0 => 1,
-            n => n,
-        }
-    }
-
-    /// The amount a single connection should wait between loops in order to maintain the defined
-    /// rate. Returns a default loop if there is no rate.
-    pub fn connection_delay(&self) -> Duration {
-        match self.rate {
-            Some(rate) => {
-                Duration::from_secs(1) / rate * self.connections_per_thread() * self.num_threads()
-            }
-            None => Duration::default()
-        }
-    }
-
-    /// The number of iterations each connection loop should perform before stopping. Doesn't play
-    /// nice with limits that are not divisible by the number of threads and connections.
-    pub fn limit_per_connection(&self) -> Option<u32> {
-        match self.limit {
-            None => None,
-            Some(n) => Some(n / self.connections),
-        }
-    }
-}
 
 /// This function's goal is to make as many TCP requests as possible. Two common blockers
 /// for achieving high TCP throughput are getting capped on number of open file descriptors,
@@ -198,6 +110,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 /// start over and reconnect. If it does not successfully read, it will block until the underlying
 /// TCP read fails unless `read-timeout` is configured.
 ///
+/// todo: This ignores
 async fn connection(message: Message, config:Config) -> io::Result<()> {
     let start = Instant::now();
 

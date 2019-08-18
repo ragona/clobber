@@ -10,11 +10,13 @@
 //!
 //! ```no_run
 //! # use std::time::Duration;
-//! # use clobber::{tcp, Message, Config};
+//! # use clobber::{tcp, Message, Config, ConfigBuilder};
 //!
 //! let addr = "127.0.0.1:8000".parse().unwrap();
-//! let config = Config::new(addr, 10);
 //! let message = Message::new(b"GET / HTTP/1.1\r\nHost: localhost:8000\r\nConnection: close\r\n\r\n".to_vec());
+//! let config = ConfigBuilder::new(addr)
+//!     .connections(10)
+//!     .consume();
 //!
 //! tcp::clobber(config, message).unwrap();
 //! ```
@@ -22,12 +24,13 @@
 
 #![feature(async_await)]
 
+pub mod config;
 pub mod stats;
 pub mod tcp;
 pub mod util;
 
+pub use config::{Config, ConfigBuilder};
 pub use stats::Stats;
-pub use tcp::Config;
 
 /// Message payload
 ///

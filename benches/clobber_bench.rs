@@ -17,6 +17,7 @@ fn clobber(n: u32) {
         threads: Some(1),
         connect_timeout: None,
         read_timeout: None,
+        repeat: false,
     };
     let message = Message::new(b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec());
 

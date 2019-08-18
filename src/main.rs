@@ -166,9 +166,10 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         target,
         duration,
         connections,
+        repeat: false,
         threads: num_threads,
-        read_timeout,    // todo make this optional
-        connect_timeout, // todo make this optional
+        read_timeout,
+        connect_timeout,
     }
 }
 
