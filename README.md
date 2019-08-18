@@ -46,7 +46,7 @@ OPTIONS:
 
 ### Troubleshooting TCP Performance
 
-There are a couple of tweaks you can do to the client host to enable much higher throughput.
+There are a couple of tweaks you can do to enable much higher throughput.
 
 #### Open file limits
 
