@@ -104,6 +104,7 @@ fn cli() -> App<'static, 'static> {
         )
         .arg(
             Arg::with_name("repeat")
+                .short("r")
                 .long("repeat")
                 .help("Reuses connections to send the message repeatedly (keep-alive)"),
         )

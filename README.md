@@ -18,7 +18,7 @@ USAGE:
 
 FLAGS:
     -h, --help       Prints help information
-        --repeat     Reuses connections to send the message repeatedly (keep-alive)
+    -r  --repeat     Reuses connections to send the message repeatedly (keep-alive)
     -v               Sets the log level, from -v to -vvv
     -V, --version    Prints version information
 
@@ -36,14 +36,14 @@ OPTIONS:
 
 ## Notes 
 
+`clobber` uses the `async/await` syntax, which currently requires the nightly branch, but is targeted to stabilize in the `1.38` release. This project was created as a way to kick the tires of the new syntax, since a network I/O heavy tool is a great use case for an async concurrency model.
+
 ### Todo
-- [ ] Repeat mode 
+- [x] Repeat mode
 - [ ] Input from file path
 - [ ] Add back optional timeouts
-- [ ] Summary (log analyzer?) 
+- [ ] Summary (log analyzer?)
 
-### Development
-`clobber` uses the `async/await` syntax, which currently requires the nightly branch, but is targeted to stabilize in the `1.38` release. This project was created as a way to kick the tires of the new syntax, since a network I/O heavy tool is a great use case for an async concurrency model. 
 
 ### Troubleshooting TCP Performance
 
