@@ -18,6 +18,7 @@ USAGE:
 
 FLAGS:
     -h, --help       Prints help information
+        --repeat     Reuses connections to send the message repeatedly (keep-alive)
     -v               Sets the log level, from -v to -vvv
     -V, --version    Prints version information
 
@@ -25,7 +26,7 @@ OPTIONS:
         --connect-timeout <connect-timeout>    Timeout for initial TCP syn timeout
     -c, --connections <connections>            Max number of open connections at any given time
     -d, --duration <duration>                  Length of the run (e.g. 5s, 10m, 2h, etc...)
-    -l, --limit <limit>                        Total number of requests
+    -l, --limit <limit>                        Limit total number of requests
         --rate <rate>                          Limit to a particular rate per-second.
         --read-timeout <read-timeout>          Timeout for reading response from target
     -t, --target <target>                      Host to clobber

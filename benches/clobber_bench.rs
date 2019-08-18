@@ -1,10 +1,11 @@
 #[macro_use]
 extern crate criterion;
 
-use criterion::black_box;
 use criterion::Criterion;
+use criterion::{black_box, Benchmark};
 
 use clobber::{tcp, util::test_server, Config, ConfigBuilder, Message};
+use std::time::Duration;
 
 fn clobber_single(n: u32) {
     let (addr, _receiver) = test_server();
@@ -30,12 +31,14 @@ fn clobber_multi(n: u32) {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("clobber_single_100", |b| {
-        b.iter(|| clobber_single(black_box(100)))
-    });
-    c.bench_function("clobber_multi_100", |b| {
-        b.iter(|| clobber_multi(black_box(100)))
-    });
+    //    c.bench_function("clobber_single_1", |b| {
+    //        b.iter(|| clobber_single(black_box(10)))
+    //    });
+    //    c.bench_function("clobber_multi_1", |b| {
+    //        b.iter(|| clobber_multi(black_box(10000)))
+    //    });
+
+    // todo: None of this works. We gotta break this down further.
 }
 
 criterion_group!(benches, criterion_benchmark);

@@ -99,13 +99,13 @@ fn cli() -> App<'static, 'static> {
             Arg::with_name("limit")
                 .short("l")
                 .long("limit")
-                .help("Total number of requests")
+                .help("Limit total number of requests")
                 .takes_value(true),
         )
         .arg(
             Arg::with_name("repeat")
                 .long("repeat")
-                .help("Reuses connections to send the message repeatedly (keepalive)"),
+                .help("Reuses connections to send the message repeatedly (keep-alive)"),
         )
 }
 
