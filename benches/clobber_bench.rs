@@ -14,7 +14,7 @@ fn clobber(n: u32) {
         rate: None,
         limit: Some(n),
         duration: None,
-        num_threads: Some(1),
+        threads: Some(1),
         connect_timeout: None,
         read_timeout: None,
     };

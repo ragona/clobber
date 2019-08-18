@@ -61,34 +61,7 @@ fn get_stats(receiver: Receiver<Stats>) -> Stats {
 }
 
 #[test]
-fn single_thread_timed() -> std::io::Result<()> {
-    let (addr, receiver) = test_server();
-    let config = Config {
-        target: addr,
-        connections: 1,
-        rate: Some(10),
-        duration: Some(Duration::from_secs(1)),
-        num_threads: None,
-        connect_timeout: None,
-        read_timeout: None,
-        limit: None
-    };
-
-    tcp::clobber(config, test_message())?;
-
-    let stats = get_stats(receiver);
-    let rate = config.rate.unwrap();
-    let wanted_duration = config.duration.unwrap().as_secs();
-    let actual_duration = (stats.end_time - stats.start_time).as_secs();
-
-    assert_eq!(actual_duration, wanted_duration);
-    assert_eq!(rate * wanted_duration as u32, stats.connections as u32);
-
-    Ok(())
-}
-
-#[test]
-fn single_thread_limited() -> std::io::Result<()> {
+fn single_thread_limited_rate_and_total() -> std::io::Result<()> {
     let (addr, receiver) = test_server();
     let config = Config {
         target: addr,
@@ -96,7 +69,31 @@ fn single_thread_limited() -> std::io::Result<()> {
         rate: Some(10),
         limit: Some(20),
         duration: None,
-        num_threads: Some(1),
+        threads: Some(1),
+        connect_timeout: None,
+        read_timeout: None,
+    };
+
+    tcp::clobber(config, test_message())?;
+
+    let stats = get_stats(receiver);
+    let total = config.limit.unwrap();
+
+    assert_eq!(total, stats.connections as u32);
+
+    Ok(())
+}
+
+#[test]
+fn multi_thread_limited_rate_and_total() -> std::io::Result<()> {
+    let (addr, receiver) = test_server();
+    let config = Config {
+        target: addr,
+        connections: 10,
+        rate: Some(10),
+        limit: Some(20),
+        duration: None,
+        threads: Some(2),
         connect_timeout: None,
         read_timeout: None,
     };

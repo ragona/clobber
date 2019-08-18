@@ -1,10 +1,9 @@
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use futures::executor;
 use futures::prelude::*;
 
-use crate::{tcp, Config, Message, Stats};
+use crate::{Stats};
 use crossbeam_channel::Receiver;
 
 /// Echo server for testing

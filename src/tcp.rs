@@ -1,6 +1,12 @@
-//! # TCP business logic
+//! # TCP handling
 //!
-//! This file contains the bulk of the business logic for `clobber`.
+//! This file contains the TCP handling for `clobber`. The loop here is that we connect, write,
+//! and then read. If the client is in repeat mode then it will repeatedly write/read while the
+//! connection is open.
+//!
+//! ## Implementation notes
+//!
+//! `clobber`
 //!
 //! ## Performance Notes
 //!
@@ -57,7 +63,7 @@ pub struct Config {
     /// Optional duration. If duration is None, clobber will run indefinitely.
     pub duration: Option<Duration>,
     /// Number of OS threads to distribute work between. 0 becomes num_cpus.
-    pub num_threads: Option<u32>,
+    pub threads: Option<u32>,
     /// Optionally time out requests at a number of milliseconds. Note: checking timeouts
     /// costs CPU cycles; max performance will suffer. However, if you have an ill-behaving
     /// server that isn't connecting consistently and is hanging onto connections, this can
@@ -81,9 +87,46 @@ impl Config {
             rate: None,
             limit: None,
             duration: None,
-            num_threads: None,
+            threads: None,
             read_timeout: None,
             connect_timeout: None,
+        }
+    }
+
+    /// Number of user-defined threads, or all the threads on the host.
+    pub fn num_threads(&self) -> u32 {
+        match self.threads {
+            None => num_cpus::get() as u32,
+            Some(n) => n,
+        }
+    }
+
+    /// Number of connection loops each thread should maintain. Will never be less than the number
+    /// of threads.
+    pub fn connections_per_thread(&self) -> u32 {
+        match self.connections / self.num_threads() as u32 {
+            0 => 1,
+            n => n,
+        }
+    }
+
+    /// The amount a single connection should wait between loops in order to maintain the defined
+    /// rate. Returns a default loop if there is no rate.
+    pub fn connection_delay(&self) -> Duration {
+        match self.rate {
+            Some(rate) => {
+                Duration::from_secs(1) / rate * self.connections_per_thread() * self.num_threads()
+            }
+            None => Duration::default()
+        }
+    }
+
+    /// The number of iterations each connection loop should perform before stopping. Doesn't play
+    /// nice with limits that are not divisible by the number of threads and connections.
+    pub fn limit_per_connection(&self) -> Option<u32> {
+        match self.limit {
+            None => None,
+            Some(n) => Some(n / self.connections),
         }
     }
 }
@@ -103,33 +146,10 @@ impl Config {
 pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
     info!("Starting: {:#?}", config);
 
-    let num_threads = match config.num_threads {
-        None => num_cpus::get() as u32,
-        Some(n) => n,
-    };
+    let mut threads = Vec::with_capacity(config.num_threads() as usize);
 
-    // things get weird if you have fewer connections than threads
-    let conns_per_thread = match config.connections / num_threads as u32 {
-        0 => 1,
-        n => n,
-    };
-
-    let limit_per_conn = match config.limit {
-        None => None,
-        Some(n) => Some(n / config.connections),
-    };
-
-    let start = Instant::now();
-    let tick = match config.rate {
-        Some(rate) => Duration::from_nanos(1e9 as u64 / rate as u64),
-        None => Duration::default(),
-    };
-
-    let mut threads = Vec::with_capacity(num_threads as usize);
-
-    for _ in 0..num_threads {
+    for _ in 0..config.num_threads() {
         // per-thread clones
-        let addr = config.target.clone();
         let config = config.clone();
         let message = message.clone();
 
@@ -139,69 +159,90 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
             let mut spawner = pool.spawner();
 
             // all connection futures are spawned up front
-            for i in 0..conns_per_thread {
+            for i in 0..config.connections_per_thread() {
                 // per-connection clones
                 let message = message.clone();
                 let config = config.clone();
 
                 spawner
                     .spawn(async move {
-                        // spread out loop start times within a thread to smoothly match rate
                         if config.rate.is_some() {
-                            Delay::new(tick * num_threads * i).await.unwrap();
+                            Delay::new(i * config.connection_delay());
                         }
 
-                        // connect, write, read
-                        let mut count = 0;
-                        loop {
-                            if let Some(duration) = config.duration {
-                                if Instant::now() >= start + duration {
-                                    break
-                                }
-                            }
-
-                            if let Some(limit) = limit_per_conn {
-                                if count >= limit {
-                                    break
-                                }
-                            }
-
-                            // A bit of a connundrum here is that these methods are reliant
-                            // on the underlying OS to time out. Your kernel will do that REALLY
-                            // SLOWLY, so if you're reading from a server that doesn't send an
-                            // EOF you're gonna have a bad time. However, explicitly timing out
-                            // futures is expensive to the point that I'm seeing nearly double the
-                            // throughput by not using futures-timer for timeouts.
-                            // todo: add optional timeouts for ill-behaving servers
-                            let request_start = Instant::now();
-                            if let Ok(mut stream) = connect(&addr).await {
-                                if let Ok(_) = write(&mut stream, &message.body).await {
-                                    read(&mut stream).await.ok();
-                                }
-                            }
-
-                            if config.rate.is_some() {
-                                let elapsed = Instant::now() - request_start;
-                                let delay = tick * conns_per_thread * num_threads;
-                                if elapsed < delay {
-                                    Delay::new(delay - elapsed).await.unwrap();
-                                } else {
-                                    warn!("running behind; consider adding more connections");
-                                }
-                            }
-
-                            count += 1;
-                        }
+                        connection(message, config)
+                            .await
+                            .expect("Failed to run connection");
                     })
                     .unwrap();
             }
             pool.run();
         });
         threads.push(thread);
-        std::thread::sleep(tick / 2); // stagger the start of each thread by a single tick
+
+        // spread out threads within a second
+        std::thread::sleep(Duration::from_secs(1) / config.num_threads());
     }
     for handle in threads {
         handle.join().unwrap();
+    }
+
+    Ok(())
+}
+
+/// Handles a single connection
+///
+/// This method infinitely loops, performing a connect/write/read transaction against the
+/// configured target. If `repeat` is true in `config`, the loop will keep the connection alive.
+/// Otherwise, it will drop the connection after successfully completing a read, and then it will
+/// start over and reconnect. If it does not successfully read, it will block until the underlying
+/// TCP read fails unless `read-timeout` is configured.
+///
+async fn connection(message: Message, config:Config) -> io::Result<()> {
+    let start = Instant::now();
+
+    let mut count = 0;
+    let mut loop_complete = move || {
+        count += 1;
+
+        if let Some(duration) = config.duration {
+            if Instant::now() >= start + duration {
+                return true
+            }
+        }
+
+        if let Some(limit) = config.limit_per_connection(){
+            if count > limit {
+                return true
+            }
+        }
+
+        false
+    };
+
+    while !loop_complete() {
+        let request_start = Instant::now();
+        // A bit of a connundrum here is that these methods are reliant
+        // on the underlying OS to time out. Your kernel will do that REALLY
+        // SLOWLY, so if you're reading from a server that doesn't send an
+        // EOF you're gonna have a bad time. However, explicitly timing out
+        // futures is expensive to the point that I'm seeing nearly double the
+        // throughput by not using futures-timer for timeouts.
+        // todo: add optional timeouts for ill-behaving servers
+        if let Ok(mut stream) = connect(&config.target).await {
+            if let Ok(_) = write(&mut stream, &message.body).await {
+                read(&mut stream).await.ok();
+            }
+        }
+
+        if config.rate.is_some() {
+            let elapsed = Instant::now() - request_start;
+            if elapsed < config.connection_delay() {
+                Delay::new(config.connection_delay() - elapsed).await.unwrap();
+            } else {
+                warn!("running behind; consider adding more connections");
+            }
+        }
     }
 
     Ok(())
