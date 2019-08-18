@@ -35,24 +35,24 @@ OPTIONS:
 
 ```
 
-## Tuning and Troubleshooting TCP Performance
+### Troubleshooting TCP Performance
 
-There are a couple of small tweaks you can do to the client host to enable much higher throughput.
+There are a couple of tweaks you can do to the client host to enable much higher throughput.
 
-### 1. Open file limits
+#### 1. Open file limits
 
 A common cause of TCP throughput issues is number of open files. You can check this with `ulimit -n`. If you're seeing
 issues with number of open files you can raise this limit with `ulimit`, and by editing the `/etc/security/limits.conf`
 file if the hard limit in `ulimit` is smaller than it needs to be. 
 
-### 2. Connection timeouts
+#### 2. Connection timeouts
 
 The initial syn phase in the TCP handshake has a long timeout; often in the hundreds of seconds. This is controlled
 in `/proc/sys/net/ipv4/tcp_syn_retries`, but even if you set this to a low number a single timeout can take a long
 time. This mostly isn't an issue with the intended use case of testing locally running servers with `clobber`, but
 if your handshake is unreliable you can try configuring the `connect-timeout` option.
 
-### 3. Read timeouts
+#### 3. Read timeouts
 
 Knowing when to stop reading from a TCP stream is tricky if you don't know how much data you should read. This is
 protocol dependent, and `clobber` has no idea. If the server doesn't send an `EOF` you can get stuck waiting for more
