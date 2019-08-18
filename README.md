@@ -1,6 +1,6 @@
 # clobber
 
-`clobber` is a simple TCP load testing tool written in Rust. It can be a lot of work setting up a load test. `clobber` aims to simply throw a lot of traffic at a host, and a lot of the time that's all you need. 
+`clobber` is a simple TCP load testing tool written in Rust. It can be a lot of work setting up a load test. `clobber` aims to simply throw a lot of traffic at a host without needing a lot of configuration. 
 
 ## Example
 
