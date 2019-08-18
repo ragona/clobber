@@ -52,7 +52,7 @@ This library uses no cross-thread communication via `std::sync` or `crossbeam`. 
 
 It can be a lot of work setting up a load test. `clobber` aims to simply throw a lot of traffic at a host, and much of the time that's all you need. If you need more configuration check out the examples.
 
-## Tips: Tuning and Troubleshooting TCP Performance
+## Tuning and Troubleshooting TCP Performance
 
 There are a couple of small tweaks you can do to the client host to enable much higher throughput.
 
@@ -79,10 +79,3 @@ data for a long time, and this can block connections. With some protocols, such 
 an `EOF` after they've responded. This can fix throughput issues against some HTTP servers. If this isn't possible you
 should configure the `read-timeout`, but this does have a bit of an impact on performance (especially with a high
 number of connections.)
-
-## Known issues
-
-**Precise Rate Limiting**: A note on timing is that different architectures have different available precision for
-sleep timing. A result of this is that you can get a significant increase in performance by not having any rate limit.
-For example, if you're trying to hit 20,000 requests per second and only seeing 17k, you may end up getting 25k (or
-even quite a bit more) if you fully remove the limit.
