@@ -16,7 +16,7 @@ use clap::{App, Arg, ArgMatches};
 use humantime;
 use log::LevelFilter;
 
-use clobber::{tcp, Config, Message};
+use clobber::{setup_logger, tcp, Config, Message};
 
 fn main() {
     let cli = cli();
@@ -103,6 +103,13 @@ fn cli() -> App<'static, 'static> {
                 .help("Total number of requests")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("repeat")
+                .short("r")
+                .long("repeat")
+                .help("Repeats the outgoing message")
+                .takes_value(true),
+        )
 }
 
 fn settings_from_argmatches(matches: &ArgMatches) -> Config {
@@ -117,6 +124,12 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .unwrap_or("0")
         .parse::<u32>()
         .expect("Failed to parse rate");
+
+    let repeat = matches
+        .value_of("repeat")
+        .unwrap_or("1")
+        .parse::<u32>()
+        .expect("Failed to parse repeat");
 
     let limit = matches
         .value_of("limit")
@@ -140,8 +153,8 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         None => None,
     };
 
-    let num_threads = match matches.value_of("threads") {
-        Some(num_threads) => Some(num_threads.parse::<u32>().expect("Failed to parse threads")),
+    let threads = match matches.value_of("threads") {
+        Some(threads) => Some(threads.parse::<u32>().expect("Failed to parse threads")),
         None => None,
     };
 
@@ -163,33 +176,14 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
     Config {
         rate,
         limit,
+        repeat,
         target,
+        threads,
         duration,
         connections,
-        repeat: false,
-        threads: num_threads,
         read_timeout,
         connect_timeout,
     }
-}
-
-pub fn setup_logger(log_level: LevelFilter) -> Result<(), Box<dyn std::error::Error>> {
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{}[{}][{}] {}",
-                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
-                record.target(),
-                record.level(),
-                message
-            ))
-        })
-        .level(log_level)
-        .chain(std::io::stdout())
-        .chain(fern::log_file("clobber.log")?)
-        .apply()?;
-
-    Ok(())
 }
 
 /// This is a bit of a weird way to do this, but I'm not sure what the better option is.

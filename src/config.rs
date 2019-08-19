@@ -33,8 +33,8 @@ pub struct Config {
     pub read_timeout: Option<u32>,
     /// Absolute number of requests to be made. Should split evenly across threads.
     pub limit: Option<u32>,
-    /// Will send write/read requests repeatedly while the connection is open. ("Keepalive")
-    pub repeat: bool,
+    /// Repeats the outgoing message
+    pub repeat: u32,
 }
 
 impl Config {
@@ -46,7 +46,7 @@ impl Config {
             connections,
             rate: None,
             limit: None,
-            repeat: false,
+            repeat: 1,
             duration: None,
             threads: None,
             read_timeout: None,
@@ -143,7 +143,7 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn repeat(mut self, repeat: bool) -> ConfigBuilder {
+    pub fn repeat(mut self, repeat: u32) -> ConfigBuilder {
         self.config.repeat = repeat;
         self
     }

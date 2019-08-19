@@ -113,6 +113,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 /// todo: This ignores
 async fn connection(message: Message, config:Config) -> io::Result<()> {
     let start = Instant::now();
+    let message = message.repeat(config.repeat as usize);
 
     let mut count = 0;
     let mut loop_complete = move || {
