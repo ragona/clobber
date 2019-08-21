@@ -3,7 +3,7 @@ name = "clobber"
 version = "0.1.1"
 authors = ["ragona <ryanragona@gmail.com>"]
 edition = "2018"
-description = "Stress testing. In early development, should not be used."
+description = "TCP load testing tool, written in async Rust"
 license = "MIT"
 
 [dependencies]
