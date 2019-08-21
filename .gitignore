@@ -1,4 +1,6 @@
 # clobber
+clobber
+tools/
 .idea/
 clobber.log
 

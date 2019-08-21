@@ -7,6 +7,7 @@ use futures::prelude::*;
 
 use clobber::{tcp, Message, Stats, ConfigBuilder};
 use crossbeam_channel::Receiver;
+use std::time::Duration;
 
 /// Echo server for testing
 /// todo: Allow tests to pass in an enum to configure how the server behaves. (e.g. Echo vs. static.)
@@ -97,6 +98,20 @@ fn multi_thread_limited_rate_and_total() -> std::io::Result<()> {
     let total = config.limit.unwrap();
 
     assert_eq!(total, stats.connections as u32);
+
+    Ok(())
+}
+
+#[test]
+fn rateless_with_duration() -> std::io::Result<()> {
+    let addr = "0.0.0.0:8000".parse().unwrap();
+    let config = ConfigBuilder::new(addr)
+        .connections(4)
+        .threads(Some(2))
+        .duration(Some(Duration::from_secs(1)))
+        .build();
+
+    tcp::clobber(config, test_message())?;
 
     Ok(())
 }
