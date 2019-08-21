@@ -33,8 +33,6 @@ pub mod util;
 pub use config::{Config, ConfigBuilder};
 pub use stats::Stats;
 
-use std::iter;
-
 use fern;
 use log::LevelFilter;
 
@@ -82,6 +80,7 @@ pub fn setup_logger(log_level: LevelFilter) -> Result<(), Box<dyn std::error::Er
     Ok(())
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 

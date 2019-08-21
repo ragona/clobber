@@ -7,14 +7,10 @@
 
 extern crate clobber;
 
-use std::io::{stdin, Read};
 use std::net::SocketAddr;
-use std::thread;
-use std::time::Duration;
 
 use clap::{App, Arg, ArgMatches};
 use humantime;
-use log::LevelFilter;
 
 use clobber::util::optional_stdin;
 use clobber::{setup_logger, tcp, Config, ConfigBuilder, Message};

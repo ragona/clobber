@@ -1,12 +1,11 @@
 #![feature(async_await)]
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use futures::executor;
 use futures::prelude::*;
 
-use clobber::{tcp, Config, Message, Stats, ConfigBuilder};
+use clobber::{tcp, Message, Stats, ConfigBuilder};
 use crossbeam_channel::Receiver;
 
 /// Echo server for testing

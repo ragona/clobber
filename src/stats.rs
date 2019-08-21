@@ -32,6 +32,12 @@ impl Stats {
     }
 }
 
+impl Default for Stats {
+    fn default() -> Stats {
+        Stats::new()
+    }
+}
+
 impl Add for Stats {
     type Output = Stats;
 

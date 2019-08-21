@@ -68,7 +68,6 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 
     for _ in 0..config.num_threads() {
         // per-thread clones
-        let config = config.clone();
         let message = message.clone();
 
         // start OS thread which will contain a chunk of connections
@@ -79,7 +78,6 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
             // all connection futures are spawned up front
             for i in 0..config.connections_per_thread() {
                 // per-connection clones
-                let config = config.clone();
                 let message = message.repeat(config.repeat as usize);
 
                 spawner
@@ -139,29 +137,39 @@ async fn connection(message: Message, config:Config) -> io::Result<()> {
         false
     };
 
+    let should_delay = move |elapsed| {
+        match config.rate {
+            Some(_) => {
+                if elapsed < config.connection_delay() {
+                    true
+                } else {
+                    warn!("running behind; consider adding more connections");
+                    false
+                }
+            }
+            None => {
+                false
+            }
+
+        }
+    };
+
     while !loop_complete() {
+        // todo: add optional timeouts back
         let request_start = Instant::now();
-        // A bit of a connundrum here is that these methods are reliant
-        // on the underlying OS to time out. Your kernel will do that REALLY
-        // SLOWLY, so if you're reading from a server that doesn't send an
-        // EOF you're gonna have a bad time. However, explicitly timing out
-        // futures is expensive to the point that I'm seeing nearly double the
-        // throughput by not using futures-timer for timeouts.
-        // todo: add optional timeouts for ill-behaving servers
         if let Ok(mut stream) = connect(&config.target).await {
-            if let Ok(_) = write(&mut stream, &message.body).await {
+            if write(&mut stream, &message.body).await.is_ok() {
                 read(&mut stream).await.ok();
             }
         }
 
         if config.rate.is_some() {
             let elapsed = Instant::now() - request_start;
-            if elapsed < config.connection_delay() {
+            if should_delay(elapsed) {
                 Delay::new(config.connection_delay() - elapsed).await.unwrap();
-            } else {
-                warn!("running behind; consider adding more connections");
             }
         }
+
     }
 
     Ok(())
@@ -169,9 +177,9 @@ async fn connection(message: Message, config:Config) -> io::Result<()> {
 
 /// Connects to the provided address, logs any errors and returns errors encountered.
 async fn connect(addr: &SocketAddr) -> io::Result<TcpStream> {
-    match TcpStream::connect(&addr).await {
+    match TcpStream::connect(addr).await {
         Ok(stream) => {
-            debug!("connected to {}", &addr);
+            debug!("connected to {}", addr);
             Ok(stream)
         }
         Err(e) => {
@@ -207,6 +215,7 @@ async fn read(stream: &mut TcpStream) -> io::Result<usize> {
             debug!("{} bytes read ", n);
             Ok(n)
         }
+        // todo move to dedicated method
         Err(ref e) if e.kind() == io::ErrorKind::TimedOut => {
             warn!("read timeout: {:?}", stream);
             Err(io::Error::new(io::ErrorKind::TimedOut, "foo"))
@@ -218,5 +227,5 @@ async fn read(stream: &mut TcpStream) -> io::Result<usize> {
     }
 
     // todo: Do something with the read_buffer?
-    // todo: Perf testing on more verbose logging for analysis
+    // todo: More verbose logging; dump to stdout, do post-run analysis on demand
 }
