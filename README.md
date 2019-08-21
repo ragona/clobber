@@ -4,6 +4,8 @@
 
 It can be a lot of work configuring a load test. `clobber` aims to simply throw a lot of traffic at a host, and much of the time that's all you need. `clobber` tries to deliver sensible defaults, and easy knobs to turn if you do need more advanced configuration.
 
+My goal for this project is for the code to be performant, easy to read, and idiotmatic. If you see an area that is inefficient or confusing, I would happily welcome the feedback in an issue or PR.
+
 ## Examples
 
 Default
