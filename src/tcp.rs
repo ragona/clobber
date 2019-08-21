@@ -8,9 +8,11 @@
 //!
 //! ### Perform allocations at startup
 //!
-//! This library tries to limit significant allocations to startup rather than doing them on the
-//! fly. More specifically, you shouldn't see any of these behaviors inside the tight `while` loop
-//! inside the `connection()` method that handles a single loop.
+//! The pool of connections is created up front, and then connections begin sending requests
+//! to match the defined rate. (Or in the case of no defined, they start immediately.) In general
+//! we try to to limit significant allocations to startup rather than doing them on the fly.
+//! More specifically, you shouldn't see any of these behaviors inside the tight `while` loop
+//! inside the `connection()` method.
 //!
 //! ### Limit open ports and files
 //!
@@ -49,10 +51,9 @@ use romio::TcpStream;
 use crate::{Message, Config};
 
 
-/// This function's goal is to make as many TCP requests as possible. Two common blockers
-/// for achieving high TCP throughput are getting capped on number of open file descriptors,
-/// or running out of available ports. `clobber` tries to minimize open ports and files by
-/// limiting the number of active requests via the `connections` argument.
+/// The overall test runner
+///
+/// This method contains the main core loop
 ///
 /// `clobber` will create `connections` number of async futures, distribute them across `threads`
 /// threads (defaults to num_cpus), and each future will perform requests in a tight loop. If
@@ -154,6 +155,7 @@ async fn connection(message: Message, config:Config) -> io::Result<()> {
         }
     };
 
+    // This is the guts of the application; the tight loop that executes requests
     while !loop_complete() {
         // todo: add optional timeouts back
         let request_start = Instant::now();
@@ -175,7 +177,7 @@ async fn connection(message: Message, config:Config) -> io::Result<()> {
     Ok(())
 }
 
-/// Connects to the provided address, logs any errors and returns errors encountered.
+/// Connects to the provided address, logs, returns Result<TcpStream, io::Error>
 async fn connect(addr: &SocketAddr) -> io::Result<TcpStream> {
     match TcpStream::connect(addr).await {
         Ok(stream) => {
@@ -191,7 +193,7 @@ async fn connect(addr: &SocketAddr) -> io::Result<TcpStream> {
     }
 }
 
-/// Writes provided buffer to the provided address, logs errors, returns errors encountered.
+/// Writes provided buffer to the provided address, logs, returns Result<bytes_written, io::Error>
 async fn write(stream: &mut TcpStream, buf: &[u8]) -> io::Result<usize> {
     match stream.write_all(buf).await {
         Ok(_) => {
@@ -206,7 +208,7 @@ async fn write(stream: &mut TcpStream, buf: &[u8]) -> io::Result<usize> {
     }
 }
 
-/// Reads from stream, logs any errors, returns errors encountered
+/// Reads from stream, logs, returns Result<num_bytes_read, io::Error>
 async fn read(stream: &mut TcpStream) -> io::Result<usize> {
     let mut read_buffer = vec![]; // todo: size?
     match stream.read_to_end(&mut read_buffer).await {
@@ -214,11 +216,6 @@ async fn read(stream: &mut TcpStream) -> io::Result<usize> {
             let n = read_buffer.len();
             debug!("{} bytes read ", n);
             Ok(n)
-        }
-        // todo move to dedicated method
-        Err(ref e) if e.kind() == io::ErrorKind::TimedOut => {
-            warn!("read timeout: {:?}", stream);
-            Err(io::Error::new(io::ErrorKind::TimedOut, "foo"))
         }
         Err(e) => {
             error!("read error: '{}'", e);

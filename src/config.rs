@@ -1,3 +1,9 @@
+//! Settings that control the test
+//!
+//! This is a struct and impl that contains the configuration options. `Config` should be easy
+//! to copy, as it is passed to each `connection()` call.  
+//!
+
 extern crate proc_macro;
 
 use std::net::SocketAddr;
@@ -71,7 +77,7 @@ impl Config {
     }
 
     /// The amount a single connection should wait between loops in order to maintain the defined
-    /// rate. Returns a default loop if there is no rate.
+    /// rate. Returns a default duration if there is no rate.
     pub fn connection_delay(&self) -> Duration {
         match self.rate {
             Some(rate) => {
