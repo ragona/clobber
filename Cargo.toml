@@ -1,10 +1,11 @@
 [package]
 name = "clobber"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["ragona <ryanragona@gmail.com>"]
 edition = "2018"
 description = "TCP load testing tool, written in async Rust"
 license = "MIT"
+repository = "https://github.com/ragona/clobber"
 
 [dependencies]
 log = "0.4.7"
