@@ -69,7 +69,7 @@ fn single_thread_limited_rate_and_total() -> std::io::Result<()> {
         .rate(Some(10))
         .limit(Some(20))
         .threads(Some(1))
-        .consume();
+        .build();
 
     tcp::clobber(config, test_message())?;
 
@@ -90,7 +90,7 @@ fn multi_thread_limited_rate_and_total() -> std::io::Result<()> {
         .limit(Some(20))
         .connections(10)
         .threads(Some(2))
-        .consume();
+        .build();
 
     tcp::clobber(config, test_message())?;
 

@@ -38,7 +38,6 @@ pub struct Config {
 }
 
 impl Config {
-    // todo: builder pattern
     pub fn new(target: SocketAddr) -> Config {
         let connections = 100; // todo: detect?
         Config {
@@ -104,7 +103,7 @@ impl ConfigBuilder {
         }
     }
 
-    pub fn consume(self) -> Config {
+    pub fn build(self) -> Config {
         self.config
     }
 

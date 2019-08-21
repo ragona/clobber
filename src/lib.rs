@@ -1,6 +1,7 @@
 //! # Tool for TCP load testing
 //!
-//! The primary goal for `clobber` is speed; we want to make TCP requests as fast as possible.
+//! The primary goal for `clobber` is speed; we want to make TCP requests as fast as possible. If
+//! you're interested in reading the code, go check out `tcp.rs` for the interesting part!
 //!
 //! This library is used internally by the main.rs binary and the tests, and is not intended for
 //! general use in other projects. (But if you're interested, post an issue; I'd be happy to hear

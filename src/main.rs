@@ -16,7 +16,8 @@ use clap::{App, Arg, ArgMatches};
 use humantime;
 use log::LevelFilter;
 
-use clobber::{setup_logger, tcp, Config, Message};
+use clobber::util::optional_stdin;
+use clobber::{setup_logger, tcp, Config, ConfigBuilder, Message};
 
 fn main() {
     let cli = cli();
@@ -173,41 +174,14 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         n => Some(n),
     };
 
-    Config {
-        rate,
-        limit,
-        repeat,
-        target,
-        threads,
-        duration,
-        connections,
-        read_timeout,
-        connect_timeout,
-    }
-}
-
-/// This is a bit of a weird way to do this, but I'm not sure what the better option is.
-/// What this bit of code does is that it spins off a thread to listen to stdin, and then
-/// sleeps for a moment to give that thread time to put something in the channel. It... works.
-/// Surely there is a more idiomatic option though. ‾\_(ツ)_/‾
-fn optional_stdin() -> Option<Vec<u8>> {
-    let (sender, receiver) = std::sync::mpsc::channel();
-
-    thread::spawn(move || {
-        let sin = stdin();
-        let mut bytes = vec![];
-
-        sin.lock()
-            .read_to_end(&mut bytes)
-            .expect("Failed to read from stdin");
-
-        sender.send(bytes).expect("Failed to send input");
-    });
-
-    thread::sleep(Duration::from_millis(1));
-
-    match receiver.try_recv() {
-        Ok(l) => Some(l),
-        _ => None,
-    }
+    ConfigBuilder::new(target)
+        .rate(rate)
+        .limit(limit)
+        .repeat(repeat)
+        .threads(threads)
+        .duration(duration)
+        .connections(connections)
+        .read_timeout(read_timeout)
+        .connect_timeout(connect_timeout)
+        .build()
 }

@@ -6,6 +6,12 @@
 //!
 //! ## Performance Notes
 //!
+//! ### Perform allocations at startup
+//!
+//! This library tries to limit significant allocations to startup rather than doing them on the
+//! fly. More specifically, you shouldn't see any of these behaviors inside the tight `while` loop
+//! inside the `connection()` method that handles a single loop.
+//!
 //! ### Limit open ports and files
 //!
 //! Two of the key limiting factors for high TCP client throughput are running out of ports, or
@@ -65,7 +71,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
         let config = config.clone();
         let message = message.clone();
 
-        // start thread which will contain a chunk of connections
+        // start OS thread which will contain a chunk of connections
         let thread = std::thread::spawn(move || {
             let mut pool = LocalPool::new();
             let mut spawner = pool.spawner();
@@ -73,8 +79,8 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
             // all connection futures are spawned up front
             for i in 0..config.connections_per_thread() {
                 // per-connection clones
-                let message = message.clone();
                 let config = config.clone();
+                let message = message.repeat(config.repeat as usize);
 
                 spawner
                     .spawn(async move {
@@ -113,7 +119,6 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 /// todo: This ignores
 async fn connection(message: Message, config:Config) -> io::Result<()> {
     let start = Instant::now();
-    let message = message.repeat(config.repeat as usize);
 
     let mut count = 0;
     let mut loop_complete = move || {
