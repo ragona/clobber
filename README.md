@@ -7,12 +7,14 @@ It can be a lot of work configuring a load test. `clobber` aims to simply throw 
 ## Examples
 
 Default
-```
+```bash
+# Only --target/-t is mandatory
 echo "GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n" | clobber --target=0.0.0.0:8000
 ```
 
-Configuration
-```
+```bash
+# Other options can be provided via their own option flags. See Usage for full details.
+
 TARGET=0.0.0.0:8000
 CONNECTIONS=10000
 DURATION=1m30s
@@ -25,7 +27,6 @@ echo "GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n" | clobber \
     --threads=$THREADS
 ```
 
-## Usage
 ```
 clobber 0.1
 tcp load testing tool
@@ -52,13 +53,10 @@ OPTIONS:
 
 ### Troubleshooting TCP Performance
 
-There are a couple of tweaks you can do to the client host to enable much higher throughput.
-
 #### Open file limits
 
 A common cause of TCP throughput issues is number of open files. You can check this with `ulimit -n`. If you're seeing
-issues with number of open files you can raise this limit with `ulimit`, and by editing the `/etc/security/limits.conf`
-file if the hard limit in `ulimit` is smaller than it needs to be. 
+issues with number of open files you can raise this limit with `ulimit`. If that doesn't work, you may need to edit `/etc/security/limits.conf` to raise the limit for your account.
 
 #### Connection timeouts
 
