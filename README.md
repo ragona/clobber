@@ -22,7 +22,8 @@ CONNECTIONS=10000
 DURATION=1m30s
 THREADS=4
 
-echo "GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n" | clobber \
+# An easy pattern is to save a request to a file, and send it to clobber via the stdin pipe
+cat my_request | clobber \
     --target=$TARGET \
     --connections=$CONNECTIONS \
     --duration=$DURATION \
