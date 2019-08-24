@@ -29,7 +29,7 @@ cat my_request | clobber \
     --duration=$DURATION \
     --threads=$THREADS
 ```
-
+# Usage
 ```
 clobber 0.1
 tcp load testing tool
