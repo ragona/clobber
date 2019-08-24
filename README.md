@@ -7,8 +7,6 @@ It can be a lot of work configuring a load test. `clobber` aims to simply throw 
 My goal for this project is for the code to be performant, easy to read, and idiotmatic. If you see an area that is inefficient or confusing, I would happily welcome the feedback in an issue or PR.
 
 ## Examples
-
-Default
 ```bash
 # Only --target/-t is mandatory
 echo "GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n" | clobber --target=0.0.0.0:8000
