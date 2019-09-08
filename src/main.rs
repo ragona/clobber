@@ -2,9 +2,6 @@
 //!
 //! Should be limited to CLI interaction; business logic is mostly in the `tcp::clobber` method.
 //!
-
-#![feature(async_await)]
-
 extern crate clobber;
 
 use std::net::SocketAddr;

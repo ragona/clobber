@@ -22,10 +22,8 @@
 //! tcp::clobber(config, message).unwrap();
 //! ```
 //!
-
-#![feature(async_await)]
-
 pub mod config;
+pub mod server;
 pub mod stats;
 pub mod tcp;
 pub mod util;

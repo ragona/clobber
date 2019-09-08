@@ -1,52 +1,6 @@
-use std::net::SocketAddr;
+use std::io::{stdin, Read};
 use std::thread;
 use std::time::Duration;
-use std::io::{stdin, Read};
-
-use futures::executor;
-use futures::prelude::*;
-
-use crossbeam_channel::Receiver;
-
-use crate::{Stats};
-
-/// Echo server for testing
-/// todo: Allow tests to pass in an enum to configure how the server behaves. (e.g. Echo vs. static.)
-pub fn test_server() -> (SocketAddr, Receiver<Stats>) {
-    let mut server = romio::TcpListener::bind(&"127.0.0.1:0".parse().unwrap()).unwrap();
-    let mut read_buf = [0u8; 128];
-    let addr = server.local_addr().unwrap();
-    let (tx, rx) = crossbeam_channel::unbounded();
-
-    std::thread::spawn(move || {
-        executor::block_on(async move {
-            let mut incoming = server.incoming();
-            while let Some(stream) = incoming.next().await {
-                match stream {
-                    Ok(mut stream) => {
-                        let tx = tx.clone();
-                        let mut stats = Stats::new();
-                        stats.connections += 1;
-                        juliex::spawn(async move {
-                            stream.read(&mut read_buf).await.unwrap();
-                            stats.bytes_read += read_buf.len();
-                            stream.write(&read_buf).await.unwrap();
-                            stats.bytes_written += read_buf.len();
-                            stream.close().await.unwrap();
-
-                            tx.send(stats).unwrap();
-                        });
-                    }
-                    Err(e) => {
-                        panic!(e);
-                    }
-                }
-            }
-        })
-    });
-
-    (addr, rx)
-}
 
 /// This is a bit of a weird way to do this, but I'm not sure what the better option is.
 /// What this bit of code does is that it spins off a thread to listen to stdin, and then

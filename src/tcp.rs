@@ -32,24 +32,25 @@
 //! global thread that manages timers. This ends up putting disproportionate load on that thread at
 //! some point. But if you're relying on rate limiting you're trying to slow it down, so we're
 //! putting this in the 'feature' column. (If anyone would like to contribute a thread-local
-//! futures timer it'd be a great contribution to the Rust community!*)
+//! futures timer it'd be a great contribution to the Rust community!)
 //!
-
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
+use async_std::io::{self, Read};
+use async_std::net::{TcpStream};
+use async_std::prelude::*;
+
+// I'd like to remove this dependency, but async-std doesn't currently have a LocalPool executor
+// todo: Revisit
 use futures::executor::LocalPool;
-use futures::io;
-use futures::prelude::*;
 use futures::task::SpawnExt;
+
 use futures_timer::Delay;
-
 use log::{debug, error, info, warn};
-use romio::TcpStream;
 
-use crate::{Message, Config};
-
+use crate::{Config, Message};
 
 /// The overall test runner
 ///
@@ -90,8 +91,8 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                         connection(message, config)
                             .await
                             .expect("Failed to run connection");
-                    })
-                    .unwrap();
+                    }).unwrap();
+
             }
             pool.run();
         });
@@ -116,7 +117,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 /// TCP read fails unless `read-timeout` is configured.
 ///
 /// todo: This ignores
-async fn connection(message: Message, config:Config) -> io::Result<()> {
+async fn connection(message: Message, config: Config) -> io::Result<()> {
     let start = Instant::now();
 
     let mut count = 0;
@@ -125,34 +126,29 @@ async fn connection(message: Message, config:Config) -> io::Result<()> {
 
         if let Some(duration) = config.duration {
             if Instant::now() >= start + duration {
-                return true
+                return true;
             }
         }
 
-        if let Some(limit) = config.limit_per_connection(){
+        if let Some(limit) = config.limit_per_connection() {
             if count > limit {
-                return true
+                return true;
             }
         }
 
         false
     };
 
-    let should_delay = move |elapsed| {
-        match config.rate {
-            Some(_) => {
-                if elapsed < config.connection_delay() {
-                    true
-                } else {
-                    warn!("running behind; consider adding more connections");
-                    false
-                }
-            }
-            None => {
+    let should_delay = move |elapsed| match config.rate {
+        Some(_) => {
+            if elapsed < config.connection_delay() {
+                true
+            } else {
+                warn!("running behind; consider adding more connections");
                 false
             }
-
         }
+        None => false,
     };
 
     // This is the guts of the application; the tight loop that executes requests
@@ -168,10 +164,11 @@ async fn connection(message: Message, config:Config) -> io::Result<()> {
         if config.rate.is_some() {
             let elapsed = Instant::now() - request_start;
             if should_delay(elapsed) {
-                Delay::new(config.connection_delay() - elapsed).await.unwrap();
+                Delay::new(config.connection_delay() - elapsed)
+                    .await
+                    .unwrap();
             }
         }
-
     }
 
     Ok(())
@@ -225,4 +222,57 @@ async fn read(stream: &mut TcpStream) -> io::Result<usize> {
 
     // todo: Do something with the read_buffer?
     // todo: More verbose logging; dump to stdout, do post-run analysis on demand
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::echo_server;
+
+    #[test]
+    fn test_connect() {
+        let result = async_std::task::block_on(async {
+            let addr = echo_server().unwrap();
+            let result = connect(&addr).await;
+
+            result
+        });
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_write() {
+        let addr = echo_server().unwrap();
+        let input = "test".as_bytes();
+        let want = input.len();
+
+        let result = async_std::task::block_on(async move {
+            let mut stream = connect(&addr).await?;
+            let bytes_written = write(&mut stream, &input).await?;
+            Ok::<_, io::Error>(bytes_written)
+        });
+
+        dbg!(&result);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), want);
+    }
+
+    #[test]
+    fn test_read() {
+        let addr = echo_server().unwrap();
+        let input = "test\n\r\n".as_bytes();
+        let want = input.len();
+
+        let result = async_std::task::block_on(async move {
+            let mut stream = connect(&addr).await?;
+            let _ = write(&mut stream, &input).await?;
+            let bytes_read = read(&mut stream).await?;
+
+            Ok::<_, io::Error>(bytes_read)
+        });
+
+        assert!(result.is_ok());
+        assert_eq!(want, result.unwrap());
+    }
 }
