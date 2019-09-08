@@ -38,13 +38,16 @@
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
-use futures::executor::LocalPool;
-use futures::io;
-use futures::prelude::*;
-use futures::task::SpawnExt;
-use futures_timer::Delay;
+use async_std::io::{self, Read};
+use async_std::net::{TcpStream};
+use async_std::prelude::*;
 
-use async_std::net::TcpStream;
+// I'd like to remove this dependency, but async-std doesn't currently have a LocalPool executor
+// todo: Revisit
+use futures::executor::LocalPool;
+use futures::task::SpawnExt;
+
+use futures_timer::Delay;
 use log::{debug, error, info, warn};
 
 use crate::{Config, Message};
@@ -88,8 +91,8 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                         connection(message, config)
                             .await
                             .expect("Failed to run connection");
-                    })
-                    .unwrap();
+                    }).unwrap();
+
             }
             pool.run();
         });
