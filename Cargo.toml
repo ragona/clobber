@@ -1,6 +1,6 @@
 [package]
 name = "clobber"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["ragona <ryanragona@gmail.com>"]
 edition = "2018"
 description = "TCP load testing tool, written in async Rust"
