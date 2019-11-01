@@ -21,6 +21,7 @@ spin_sleep = "0.3.7"
 futures-timer = "0.3.0"
 futures-preview = "0.3.0-alpha.17"
 crossbeam-channel = "0.3.9"
+byte-mutator = {path = "/home/ragona/src/byte-mutator"}
 
 [dev-dependencies]
 criterion = "0.2"

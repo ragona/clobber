@@ -31,7 +31,7 @@ fn main() {
         None => unimplemented!("no request body"), // todo: Load from file
     };
 
-    tcp::clobber(settings, Message::new(bytes)).expect("Failed to clobber :(");
+    tcp::clobber(settings, Message::new(&bytes)).expect("Failed to clobber :(");
 }
 
 fn cli() -> App<'static, 'static> {

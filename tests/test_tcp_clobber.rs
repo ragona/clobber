@@ -6,7 +6,7 @@ use log::LevelFilter;
 use std::time::Duration;
 
 fn test_message() -> Message {
-    Message::new(b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec())
+    Message::new(b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n")
 }
 
 #[allow(dead_code)]

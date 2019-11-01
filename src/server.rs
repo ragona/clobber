@@ -14,7 +14,6 @@ async fn process(stream: TcpStream) -> io::Result<()> {
 
     let bytes_read = reader.read(&mut buf).await?;
     writer.write(&buf[0..bytes_read]).await?;
-
     Ok(())
 }
 

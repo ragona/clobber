@@ -14,7 +14,7 @@
 //! # use clobber::{tcp, Message, Config, ConfigBuilder};
 //!
 //! let addr = "127.0.0.1:8000".parse().unwrap();
-//! let message = Message::new(b"GET / HTTP/1.1\r\nHost: localhost:8000\r\nConnection: close\r\n\r\n".to_vec());
+//! let message = Message::new(b"GET / HTTP/1.1\r\nHost: localhost:8000\r\nConnection: close\r\n\r\n");
 //! let config = ConfigBuilder::new(addr)
 //!     .connections(10)
 //!     .build();
@@ -31,6 +31,7 @@ pub mod util;
 pub use config::{Config, ConfigBuilder};
 pub use stats::Stats;
 
+use byte_mutator::undo_buffer::UndoBuffer;
 use fern;
 use log::LevelFilter;
 
@@ -40,22 +41,14 @@ use log::LevelFilter;
 ///
 #[derive(Debug, Clone)]
 pub struct Message {
-    pub body: Vec<u8>,
+    pub body: UndoBuffer,
 }
 
 impl Message {
-    pub fn new(body: Vec<u8>) -> Message {
-        Message { body }
-    }
-
-    /// Returns a clone of the message with the body repeated `n` times
-    pub fn repeat(&self, n: usize) -> Message {
-        let mut repeated: Vec<u8> = Vec::with_capacity(self.body.len() * n);
-        for _ in 0..n {
-            repeated.append(&mut self.body.clone());
+    pub fn new(bytes: &[u8]) -> Message {
+        Message {
+            body: UndoBuffer::new(bytes),
         }
-
-        Message::new(repeated)
     }
 }
 
@@ -81,11 +74,4 @@ pub fn setup_logger(log_level: LevelFilter) -> Result<(), Box<dyn std::error::Er
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn repeat_message() {
-        let message = Message::new(b"foo".to_vec());
-
-        assert_eq!(message.repeat(2).body, b"foofoo".to_vec())
-    }
 }

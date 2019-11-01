@@ -80,7 +80,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
             // all connection futures are spawned up front
             for i in 0..config.connections_per_thread() {
                 // per-connection clones
-                let message = message.repeat(config.repeat as usize);
+                let message = message.clone();
 
                 spawner
                     .spawn(async move {
@@ -116,7 +116,7 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 /// start over and reconnect. If it does not successfully read, it will block until the underlying
 /// TCP read fails unless `read-timeout` is configured.
 ///
-/// todo: This ignores
+/// todo: This ignores both read-timeout and repeat
 async fn connection(message: Message, config: Config) -> io::Result<()> {
     let start = Instant::now();
 
@@ -155,10 +155,17 @@ async fn connection(message: Message, config: Config) -> io::Result<()> {
     while !loop_complete() {
         // todo: add optional timeouts back
         let request_start = Instant::now();
+        let mut read_buffer = [0u8; 1024]; // todo variable size? :(
         if let Ok(mut stream) = connect(&config.target).await {
-            if write(&mut stream, &message.body).await.is_ok() {
-                read(&mut stream).await.ok();
+            // todo: for _ in 0..config.repeat
+            // mutate
+
+            // write
+            if write(&mut stream, &message.body.read()).await.is_ok() {
+                read(&mut stream, &mut read_buffer).await.ok();
             }
+
+            //reset
         }
 
         if config.rate.is_some() {
@@ -206,11 +213,9 @@ async fn write(stream: &mut TcpStream, buf: &[u8]) -> io::Result<usize> {
 }
 
 /// Reads from stream, logs, returns Result<num_bytes_read, io::Error>
-async fn read(stream: &mut TcpStream) -> io::Result<usize> {
-    let mut read_buffer = vec![]; // todo: size?
-    match stream.read_to_end(&mut read_buffer).await {
-        Ok(_) => {
-            let n = read_buffer.len();
+async fn read(stream: &mut TcpStream, mut read_buffer: &mut [u8]) -> io::Result<usize> {
+    match stream.read(&mut read_buffer).await {
+        Ok(n) => {
             debug!("{} bytes read ", n);
             Ok(n)
         }
@@ -266,8 +271,9 @@ mod tests {
 
         let result = async_std::task::block_on(async move {
             let mut stream = connect(&addr).await?;
+            let mut read_buffer = [0u8; 1024];
             let _ = write(&mut stream, &input).await?;
-            let bytes_read = read(&mut stream).await?;
+            let bytes_read = read(&mut stream, &mut read_buffer).await?;
 
             Ok::<_, io::Error>(bytes_read)
         });
