@@ -50,7 +50,9 @@ use futures::task::SpawnExt;
 use futures_timer::Delay;
 use log::{debug, error, info, warn};
 
-use crate::{Config, Message};
+use crate::{Config};
+use byte_mutator::Stage;
+use byte_mutator::mutators::{Mutation, MutatorType};
 
 /// The overall test runner
 ///
@@ -63,7 +65,7 @@ use crate::{Config, Message};
 /// or communication with the default config. Note: for maximum performance avoid use of the
 /// `rate`, `connect_timeout`, and `read_timeout` options.
 ///
-pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
+pub fn clobber(config: Config, message: Vec<u8>) -> std::io::Result<()> {
     info!("Starting: {:#?}", config);
 
     let mut threads = Vec::with_capacity(config.num_threads() as usize);
@@ -117,8 +119,16 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 /// TCP read fails unless `read-timeout` is configured.
 ///
 /// todo: This ignores both read-timeout and repeat
-async fn connection(message: Message, config: Config) -> io::Result<()> {
+async fn connection(message: Vec<u8>, config: Config) -> io::Result<()> {
     let start = Instant::now();
+
+    // todo: configure from config
+    // configure fuzzing options
+    let mut mutator = byte_mutator::ByteMutator::new(&message);
+    let mut stage = Stage::new(100);
+
+    stage.add_mutation(Mutation::new(MutatorType::BitFlipper {width: 1}, None));
+    mutator.add_stage(stage);
 
     let mut count = 0;
     let mut loop_complete = move || {
@@ -161,10 +171,11 @@ async fn connection(message: Message, config: Config) -> io::Result<()> {
             // mutate
 
             // write
-            if write(&mut stream, &message.body.read()).await.is_ok() {
+            if write(&mut stream, mutator.read()).await.is_ok() {
                 read(&mut stream, &mut read_buffer).await.ok();
             }
 
+            mutator.next();
             //reset
         }
 

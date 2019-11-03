@@ -11,10 +11,10 @@
 //!
 //! ```no_run
 //! # use std::time::Duration;
-//! # use clobber::{tcp, Message, Config, ConfigBuilder};
+//! # use clobber::{tcp, Config, ConfigBuilder};
 //!
 //! let addr = "127.0.0.1:8000".parse().unwrap();
-//! let message = Message::new(b"GET / HTTP/1.1\r\nHost: localhost:8000\r\nConnection: close\r\n\r\n");
+//! let message = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\nConnection: close\r\n\r\n".to_vec();
 //! let config = ConfigBuilder::new(addr)
 //!     .connections(10)
 //!     .build();
@@ -31,26 +31,9 @@ pub mod util;
 pub use config::{Config, ConfigBuilder};
 pub use stats::Stats;
 
-use byte_mutator::undo_buffer::UndoBuffer;
+use byte_mutator::ByteMutator;
 use fern;
 use log::LevelFilter;
-
-/// Message payload
-///
-/// todo: Long-term goal; provide APIs for each connection to mutate its message.
-///
-#[derive(Debug, Clone)]
-pub struct Message {
-    pub body: UndoBuffer,
-}
-
-impl Message {
-    pub fn new(bytes: &[u8]) -> Message {
-        Message {
-            body: UndoBuffer::new(bytes),
-        }
-    }
-}
 
 pub fn setup_logger(log_level: LevelFilter) -> Result<(), Box<dyn std::error::Error>> {
     fern::Dispatch::new()

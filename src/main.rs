@@ -10,7 +10,7 @@ use clap::{App, Arg, ArgMatches};
 use humantime;
 
 use clobber::util::optional_stdin;
-use clobber::{setup_logger, tcp, Config, ConfigBuilder, Message};
+use clobber::{setup_logger, tcp, Config, ConfigBuilder};
 
 fn main() {
     let cli = cli();
@@ -31,7 +31,7 @@ fn main() {
         None => unimplemented!("no request body"), // todo: Load from file
     };
 
-    tcp::clobber(settings, Message::new(&bytes)).expect("Failed to clobber :(");
+    tcp::clobber(settings, bytes).expect("Failed to clobber :(");
 }
 
 fn cli() -> App<'static, 'static> {

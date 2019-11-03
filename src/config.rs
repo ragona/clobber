@@ -4,21 +4,27 @@
 //! to copy, as it is passed to each `connection()` call.
 //!
 
-extern crate proc_macro;
-
-use std::net::SocketAddr;
+use std::fs::{self, File};
+use std::io::Read;
+use std::net::{IpAddr, SocketAddr};
+use std::path::Path;
 use std::time::Duration;
+
+use futures::io::Error;
+use serde_derive::Deserialize;
+use toml;
 
 /// Settings for the load test
 ///
 /// todo: Make write/read optional. (Enum?)
 ///
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Deserialize)]
 pub struct Config {
     /// Socket address (ip and port) of the host we'll be calling
     pub target: SocketAddr,
     /// Connections is the a key knob to turn when tuning a performance test. Honestly
-    /// 'connections' isn't the best name; it implies a certain persistance that
+    /// 'connections' isn't the best name; it implies a certain persistance that isn't true.
+    /// todo: Rename to workers?
     pub connections: u32,
     /// Optional rate-limiting. Precisely timing high rates is unreliable; if you're
     /// seeing slower than expected performance try running with no rate limit at all.
@@ -56,6 +62,21 @@ impl Config {
             threads: None,
             read_timeout: None,
             connect_timeout: None,
+        }
+    }
+
+    // todo: Actually implement this
+    pub fn from_file(path: &str) -> std::io::Result<Config> {
+        unimplemented!();
+        match fs::read_to_string(path) {
+            Ok(s) => match toml::from_str(&s) {
+                Ok(c) => Ok(c),
+                Err(e) => Err(Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Failed to parse config",
+                )),
+            },
+            Err(e) => Err(e),
         }
     }
 
