@@ -104,6 +104,13 @@ fn cli() -> App<'static, 'static> {
                 .help("Repeats the outgoing message")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("fuzz")
+                .short("f")
+                .long("fuzz")
+                .help("Path to a fuzzing config .toml file")
+                .takes_value(true),
+        )
 }
 
 fn settings_from_argmatches(matches: &ArgMatches) -> Config {

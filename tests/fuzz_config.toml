@@ -1,0 +1,10 @@
+[[stages]]
+    # todo: Reconsider exposing the state like this
+    cur_iterations = 0
+    max_iterations = 100
+
+    # a list of mutations to perform on this stage
+    [[stages.mutations]]
+    mutation = {"BitFlipper" = {width = 1}}
+    range = [0, 10]     
+    width = 1   

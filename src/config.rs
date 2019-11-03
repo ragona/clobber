@@ -10,6 +10,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::time::Duration;
 
+use byte_mutator::fuzz_config::FuzzConfig;
 use futures::io::Error;
 use serde_derive::Deserialize;
 use toml;
@@ -18,7 +19,7 @@ use toml;
 ///
 /// todo: Make write/read optional. (Enum?)
 ///
-#[derive(Debug, Copy, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     /// Socket address (ip and port) of the host we'll be calling
     pub target: SocketAddr,
@@ -45,8 +46,10 @@ pub struct Config {
     pub read_timeout: Option<u32>,
     /// Absolute number of requests to be made. Should split evenly across threads.
     pub limit: Option<u32>,
-    /// Repeats the outgoing message
+    /// Repeats the outgoing message multiple times per connection.
     pub repeat: u32,
+    /// Fuzzing config toml file
+    pub fuzz_path: Option<String>,
 }
 
 impl Config {
@@ -62,6 +65,7 @@ impl Config {
             threads: None,
             read_timeout: None,
             connect_timeout: None,
+            fuzz_path: None,
         }
     }
 
@@ -171,6 +175,11 @@ impl ConfigBuilder {
 
     pub fn repeat(mut self, repeat: u32) -> ConfigBuilder {
         self.config.repeat = repeat;
+        self
+    }
+
+    pub fn fuzz_path(mut self, path: String) -> ConfigBuilder {
+        self.config.fuzz_path = Some(path);
         self
     }
 }

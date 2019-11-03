@@ -51,12 +51,13 @@ use futures_timer::Delay;
 use log::{debug, error, info, warn};
 
 use crate::{Config};
-use byte_mutator::Stage;
-use byte_mutator::mutators::{Mutation, MutatorType};
+use byte_mutator::ByteMutator;
+use byte_mutator::fuzz_config::FuzzConfig;
+use futures::io::Error;
 
 /// The overall test runner
 ///
-/// This method contains the main core loop
+/// This method contains the main core loop.
 ///
 /// `clobber` will create `connections` number of async futures, distribute them across `threads`
 /// threads (defaults to num_cpus), and each future will perform requests in a tight loop. If
@@ -70,9 +71,26 @@ pub fn clobber(config: Config, message: Vec<u8>) -> std::io::Result<()> {
 
     let mut threads = Vec::with_capacity(config.num_threads() as usize);
 
+    // configure fuzzing if a file has been provided in the config
+    let message = match &config.fuzz_path {
+        None => ByteMutator::new(&message),
+        Some(path) => {
+            match FuzzConfig::from_file(&path) {
+                Ok(fuzz_config) => ByteMutator::new_from_config(&message, fuzz_config),
+                Err(e) => {
+                    return Err(e)
+                },
+            }
+        },
+    };
+
     for _ in 0..config.num_threads() {
+        // spread out threads within a second to stagger request volume (not sure this helps?)
+        std::thread::sleep(Duration::from_secs(1) / config.num_threads());
+
         // per-thread clones
         let message = message.clone();
+        let config = config.clone();
 
         // start OS thread which will contain a chunk of connections
         let thread = std::thread::spawn(move || {
@@ -83,6 +101,7 @@ pub fn clobber(config: Config, message: Vec<u8>) -> std::io::Result<()> {
             for i in 0..config.connections_per_thread() {
                 // per-connection clones
                 let message = message.clone();
+                let config = config.clone();
 
                 spawner
                     .spawn(async move {
@@ -100,8 +119,6 @@ pub fn clobber(config: Config, message: Vec<u8>) -> std::io::Result<()> {
         });
         threads.push(thread);
 
-        // spread out threads within a second
-        std::thread::sleep(Duration::from_secs(1) / config.num_threads());
     }
     for handle in threads {
         handle.join().unwrap();
@@ -118,20 +135,15 @@ pub fn clobber(config: Config, message: Vec<u8>) -> std::io::Result<()> {
 /// start over and reconnect. If it does not successfully read, it will block until the underlying
 /// TCP read fails unless `read-timeout` is configured.
 ///
+/// This is a long-running function that will continue making calls until it hits a time or total
+/// loop count limit.
+///
 /// todo: This ignores both read-timeout and repeat
-async fn connection(message: Vec<u8>, config: Config) -> io::Result<()> {
+async fn connection(mut message: ByteMutator, config: Config) -> io::Result<()> {
     let start = Instant::now();
 
-    // todo: configure from config
-    // configure fuzzing options
-    let mut mutator = byte_mutator::ByteMutator::new(&message);
-    let mut stage = Stage::new(100);
-
-    stage.add_mutation(Mutation::new(MutatorType::BitFlipper {width: 1}, None));
-    mutator.add_stage(stage);
-
     let mut count = 0;
-    let mut loop_complete = move || {
+    let mut loop_complete = |config:&Config| {
         count += 1;
 
         if let Some(duration) = config.duration {
@@ -149,39 +161,41 @@ async fn connection(message: Vec<u8>, config: Config) -> io::Result<()> {
         false
     };
 
-    let should_delay = move |elapsed| match config.rate {
-        Some(_) => {
-            if elapsed < config.connection_delay() {
-                true
-            } else {
-                warn!("running behind; consider adding more connections");
-                false
+    let should_delay = |elapsed, config: &Config| {
+        match config.rate {
+            Some(_) => {
+                if elapsed < config.connection_delay() {
+                    true
+                } else {
+                    warn!("running behind; consider adding more connections");
+                    false
+                }
             }
+            None => false,
         }
-        None => false,
-    };
+        };
 
     // This is the guts of the application; the tight loop that executes requests
-    while !loop_complete() {
+    let mut read_buffer = [0u8; 1024]; // todo variable size? :(
+    while !loop_complete(&config) {
         // todo: add optional timeouts back
         let request_start = Instant::now();
-        let mut read_buffer = [0u8; 1024]; // todo variable size? :(
         if let Ok(mut stream) = connect(&config.target).await {
-            // todo: for _ in 0..config.repeat
-            // mutate
-
-            // write
-            if write(&mut stream, mutator.read()).await.is_ok() {
-                read(&mut stream, &mut read_buffer).await.ok();
+            // one write/read transaction per repeat
+            for _ in 0..config.repeat {
+                if write(&mut stream, message.read()).await.is_ok() {
+                    read(&mut stream, &mut read_buffer).await.ok();
+                }
             }
+            // todo: analysis
 
-            mutator.next();
-            //reset
+            // advance mutator state
+            message.next();
         }
 
         if config.rate.is_some() {
             let elapsed = Instant::now() - request_start;
-            if should_delay(elapsed) {
+            if should_delay(elapsed, &config) {
                 Delay::new(config.connection_delay() - elapsed)
                     .await
                     .unwrap();
