@@ -85,9 +85,6 @@ pub fn clobber(config: Config, message: Vec<u8>) -> std::io::Result<()> {
     };
 
     for _ in 0..config.num_threads() {
-        // spread out threads within a second to stagger request volume (not sure this helps?)
-        std::thread::sleep(Duration::from_secs(1) / config.num_threads());
-
         // per-thread clones
         let message = message.clone();
         let config = config.clone();
@@ -173,7 +170,7 @@ async fn connection(mut message: ByteMutator, config: Config) -> io::Result<()> 
             }
             None => false,
         }
-        };
+    };
 
     // This is the guts of the application; the tight loop that executes requests
     let mut read_buffer = [0u8; 1024]; // todo variable size? :(
@@ -187,9 +184,10 @@ async fn connection(mut message: ByteMutator, config: Config) -> io::Result<()> 
                     read(&mut stream, &mut read_buffer).await.ok();
                 }
             }
+
             // todo: analysis
 
-            // advance mutator state
+            // advance mutator state (no-op with no fuzzer config)
             message.next();
         }
 
