@@ -4,16 +4,10 @@
 //! to copy, as it is passed to each `connection()` call.
 //!
 
-use std::fs::{self, File};
-use std::io::Read;
-use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
+use std::net::SocketAddr;
 use std::time::Duration;
 
-use byte_mutator::fuzz_config::FuzzConfig;
-use futures::io::Error;
 use serde_derive::Deserialize;
-use toml;
 
 /// Settings for the load test
 ///

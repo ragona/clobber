@@ -3,7 +3,7 @@
 use std::thread;
 use std::net::SocketAddr;
 
-use async_std::io::{self, Read};
+use async_std::io;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::prelude::*;
 use async_std::task;

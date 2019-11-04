@@ -36,9 +36,9 @@
 //!
 
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use async_std::io::{self, Read};
+use async_std::io::{self};
 use async_std::net::{TcpStream};
 use async_std::prelude::*;
 
@@ -53,7 +53,6 @@ use log::{debug, error, info, warn};
 use crate::{Config};
 use byte_mutator::ByteMutator;
 use byte_mutator::fuzz_config::FuzzConfig;
-use futures::io::Error;
 
 /// The overall test runner
 ///

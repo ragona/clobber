@@ -13,8 +13,8 @@
 //! # use std::time::Duration;
 //! # use clobber::{tcp, Config, ConfigBuilder};
 //!
-//! let addr = "127.0.0.1:8000".parse().unwrap();
 //! let message = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\nConnection: close\r\n\r\n".to_vec();
+//! let addr = "127.0.0.1:8000".parse().unwrap();
 //! let config = ConfigBuilder::new(addr)
 //!     .connections(10)
 //!     .build();
@@ -31,7 +31,6 @@ pub mod util;
 pub use config::{Config, ConfigBuilder};
 pub use stats::Stats;
 
-use byte_mutator::ByteMutator;
 use fern;
 use log::LevelFilter;
 
@@ -52,9 +51,4 @@ pub fn setup_logger(log_level: LevelFilter) -> Result<(), Box<dyn std::error::Er
         .apply()?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 }
