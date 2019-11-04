@@ -144,6 +144,11 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .parse::<u32>()
         .expect("Failed to parse connections");
 
+    let fuzz_path = match matches.value_of("fuzz") {
+        None => None,
+        Some(s) => Some(String::from(s)),
+    };
+
     let connect_timeout = match matches.value_of("connect-timeout") {
         Some(timeout) => Some(timeout.parse().expect("Failed to parse connect_timeout")),
         None => None,
@@ -180,6 +185,7 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .repeat(repeat)
         .threads(threads)
         .duration(duration)
+        .fuzz_path(fuzz_path)
         .connections(connections)
         .read_timeout(read_timeout)
         .connect_timeout(connect_timeout)

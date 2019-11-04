@@ -68,7 +68,6 @@ use futures::io::Error;
 ///
 pub fn clobber(config: Config, message: Vec<u8>) -> std::io::Result<()> {
     info!("Starting: {:#?}", config);
-
     let mut threads = Vec::with_capacity(config.num_threads() as usize);
 
     // configure fuzzing if a file has been provided in the config
@@ -110,12 +109,10 @@ pub fn clobber(config: Config, message: Vec<u8>) -> std::io::Result<()> {
                             .await
                             .expect("Failed to run connection");
                     }).unwrap();
-
             }
             pool.run();
         });
         threads.push(thread);
-
     }
     for handle in threads {
         handle.join().unwrap();
@@ -281,7 +278,6 @@ mod tests {
             Ok::<_, io::Error>(bytes_written)
         });
 
-        dbg!(&result);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), want);
     }

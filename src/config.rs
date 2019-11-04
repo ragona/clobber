@@ -69,21 +69,6 @@ impl Config {
         }
     }
 
-    // todo: Actually implement this
-    pub fn from_file(path: &str) -> std::io::Result<Config> {
-        unimplemented!();
-        match fs::read_to_string(path) {
-            Ok(s) => match toml::from_str(&s) {
-                Ok(c) => Ok(c),
-                Err(e) => Err(Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "Failed to parse config",
-                )),
-            },
-            Err(e) => Err(e),
-        }
-    }
-
     /// Number of user-defined threads, or all the threads on the host.
     pub fn num_threads(&self) -> u32 {
         match self.threads {
@@ -178,8 +163,8 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn fuzz_path(mut self, path: String) -> ConfigBuilder {
-        self.config.fuzz_path = Some(path);
+    pub fn fuzz_path(mut self, path: Option<String>) -> ConfigBuilder {
+        self.config.fuzz_path = path;
         self
     }
 }
