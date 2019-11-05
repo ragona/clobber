@@ -4,21 +4,22 @@
 //! to copy, as it is passed to each `connection()` call.
 //!
 
-extern crate proc_macro;
-
 use std::net::SocketAddr;
 use std::time::Duration;
+
+use serde_derive::Deserialize;
 
 /// Settings for the load test
 ///
 /// todo: Make write/read optional. (Enum?)
 ///
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     /// Socket address (ip and port) of the host we'll be calling
     pub target: SocketAddr,
     /// Connections is the a key knob to turn when tuning a performance test. Honestly
-    /// 'connections' isn't the best name; it implies a certain persistance that
+    /// 'connections' isn't the best name; it implies a certain persistance that isn't true.
+    /// todo: Rename to workers?
     pub connections: u32,
     /// Optional rate-limiting. Precisely timing high rates is unreliable; if you're
     /// seeing slower than expected performance try running with no rate limit at all.
@@ -39,8 +40,10 @@ pub struct Config {
     pub read_timeout: Option<u32>,
     /// Absolute number of requests to be made. Should split evenly across threads.
     pub limit: Option<u32>,
-    /// Repeats the outgoing message
+    /// Repeats the outgoing message multiple times per connection.
     pub repeat: u32,
+    /// Fuzzing config toml file
+    pub fuzz_path: Option<String>,
 }
 
 impl Config {
@@ -56,6 +59,7 @@ impl Config {
             threads: None,
             read_timeout: None,
             connect_timeout: None,
+            fuzz_path: None,
         }
     }
 
@@ -150,6 +154,11 @@ impl ConfigBuilder {
 
     pub fn repeat(mut self, repeat: u32) -> ConfigBuilder {
         self.config.repeat = repeat;
+        self
+    }
+
+    pub fn fuzz_path(mut self, path: Option<String>) -> ConfigBuilder {
+        self.config.fuzz_path = path;
         self
     }
 }

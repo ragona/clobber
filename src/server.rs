@@ -3,7 +3,7 @@
 use std::thread;
 use std::net::SocketAddr;
 
-use async_std::io::{self, Read};
+use async_std::io;
 use async_std::net::{TcpListener, TcpStream};
 use async_std::prelude::*;
 use async_std::task;
@@ -11,10 +11,8 @@ use async_std::task;
 async fn process(stream: TcpStream) -> io::Result<()> {
     let (reader, writer) = &mut (&stream, &stream);
     let mut buf = [0_u8; 1024];
-
     let bytes_read = reader.read(&mut buf).await?;
     writer.write(&buf[0..bytes_read]).await?;
-
     Ok(())
 }
 

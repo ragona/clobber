@@ -36,9 +36,9 @@
 //!
 
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use async_std::io::{self, Read};
+use async_std::io::{self};
 use async_std::net::{TcpStream};
 use async_std::prelude::*;
 
@@ -50,11 +50,13 @@ use futures::task::SpawnExt;
 use futures_timer::Delay;
 use log::{debug, error, info, warn};
 
-use crate::{Config, Message};
+use crate::{Config};
+use byte_mutator::ByteMutator;
+use byte_mutator::fuzz_config::FuzzConfig;
 
 /// The overall test runner
 ///
-/// This method contains the main core loop
+/// This method contains the main core loop.
 ///
 /// `clobber` will create `connections` number of async futures, distribute them across `threads`
 /// threads (defaults to num_cpus), and each future will perform requests in a tight loop. If
@@ -63,14 +65,27 @@ use crate::{Config, Message};
 /// or communication with the default config. Note: for maximum performance avoid use of the
 /// `rate`, `connect_timeout`, and `read_timeout` options.
 ///
-pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
+pub fn clobber(config: Config, message: Vec<u8>) -> std::io::Result<()> {
     info!("Starting: {:#?}", config);
-
     let mut threads = Vec::with_capacity(config.num_threads() as usize);
+
+    // configure fuzzing if a file has been provided in the config
+    let message = match &config.fuzz_path {
+        None => ByteMutator::new(&message),
+        Some(path) => {
+            match FuzzConfig::from_file(&path) {
+                Ok(fuzz_config) => ByteMutator::new_from_config(&message, fuzz_config),
+                Err(e) => {
+                    return Err(e)
+                },
+            }
+        },
+    };
 
     for _ in 0..config.num_threads() {
         // per-thread clones
         let message = message.clone();
+        let config = config.clone();
 
         // start OS thread which will contain a chunk of connections
         let thread = std::thread::spawn(move || {
@@ -80,7 +95,8 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
             // all connection futures are spawned up front
             for i in 0..config.connections_per_thread() {
                 // per-connection clones
-                let message = message.repeat(config.repeat as usize);
+                let message = message.clone();
+                let config = config.clone();
 
                 spawner
                     .spawn(async move {
@@ -92,14 +108,10 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
                             .await
                             .expect("Failed to run connection");
                     }).unwrap();
-
             }
             pool.run();
         });
         threads.push(thread);
-
-        // spread out threads within a second
-        std::thread::sleep(Duration::from_secs(1) / config.num_threads());
     }
     for handle in threads {
         handle.join().unwrap();
@@ -116,12 +128,15 @@ pub fn clobber(config: Config, message: Message) -> std::io::Result<()> {
 /// start over and reconnect. If it does not successfully read, it will block until the underlying
 /// TCP read fails unless `read-timeout` is configured.
 ///
-/// todo: This ignores
-async fn connection(message: Message, config: Config) -> io::Result<()> {
+/// This is a long-running function that will continue making calls until it hits a time or total
+/// loop count limit.
+///
+/// todo: This ignores both read-timeout and repeat
+async fn connection(mut message: ByteMutator, config: Config) -> io::Result<()> {
     let start = Instant::now();
 
     let mut count = 0;
-    let mut loop_complete = move || {
+    let mut loop_complete = |config:&Config| {
         count += 1;
 
         if let Some(duration) = config.duration {
@@ -139,31 +154,42 @@ async fn connection(message: Message, config: Config) -> io::Result<()> {
         false
     };
 
-    let should_delay = move |elapsed| match config.rate {
-        Some(_) => {
-            if elapsed < config.connection_delay() {
-                true
-            } else {
-                warn!("running behind; consider adding more connections");
-                false
+    let should_delay = |elapsed, config: &Config| {
+        match config.rate {
+            Some(_) => {
+                if elapsed < config.connection_delay() {
+                    true
+                } else {
+                    warn!("running behind; consider adding more connections");
+                    false
+                }
             }
+            None => false,
         }
-        None => false,
     };
 
     // This is the guts of the application; the tight loop that executes requests
-    while !loop_complete() {
+    let mut read_buffer = [0u8; 1024]; // todo variable size? :(
+    while !loop_complete(&config) {
         // todo: add optional timeouts back
         let request_start = Instant::now();
         if let Ok(mut stream) = connect(&config.target).await {
-            if write(&mut stream, &message.body).await.is_ok() {
-                read(&mut stream).await.ok();
+            // one write/read transaction per repeat
+            for _ in 0..config.repeat {
+                if write(&mut stream, message.read()).await.is_ok() {
+                    read(&mut stream, &mut read_buffer).await.ok();
+                }
             }
+
+            // todo: analysis
+
+            // advance mutator state (no-op with no fuzzer config)
+            message.next();
         }
 
         if config.rate.is_some() {
             let elapsed = Instant::now() - request_start;
-            if should_delay(elapsed) {
+            if should_delay(elapsed, &config) {
                 Delay::new(config.connection_delay() - elapsed)
                     .await
                     .unwrap();
@@ -206,11 +232,9 @@ async fn write(stream: &mut TcpStream, buf: &[u8]) -> io::Result<usize> {
 }
 
 /// Reads from stream, logs, returns Result<num_bytes_read, io::Error>
-async fn read(stream: &mut TcpStream) -> io::Result<usize> {
-    let mut read_buffer = vec![]; // todo: size?
-    match stream.read_to_end(&mut read_buffer).await {
-        Ok(_) => {
-            let n = read_buffer.len();
+async fn read(stream: &mut TcpStream, mut read_buffer: &mut [u8]) -> io::Result<usize> {
+    match stream.read(&mut read_buffer).await {
+        Ok(n) => {
             debug!("{} bytes read ", n);
             Ok(n)
         }
@@ -253,7 +277,6 @@ mod tests {
             Ok::<_, io::Error>(bytes_written)
         });
 
-        dbg!(&result);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), want);
     }
@@ -266,8 +289,9 @@ mod tests {
 
         let result = async_std::task::block_on(async move {
             let mut stream = connect(&addr).await?;
+            let mut read_buffer = [0u8; 1024];
             let _ = write(&mut stream, &input).await?;
-            let bytes_read = read(&mut stream).await?;
+            let bytes_read = read(&mut stream, &mut read_buffer).await?;
 
             Ok::<_, io::Error>(bytes_read)
         });

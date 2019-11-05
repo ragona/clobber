@@ -5,8 +5,8 @@ use clobber::*;
 use log::LevelFilter;
 use std::time::Duration;
 
-fn test_message() -> Message {
-    Message::new(b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec())
+fn test_message() -> Vec<u8> {
+    b"GET / HTTP/1.1\r\nHost: localhost:8000\r\n\r\n".to_vec()
 }
 
 #[allow(dead_code)]
@@ -54,6 +54,21 @@ fn rateless_with_duration() -> std::io::Result<()> {
         .build();
 
     tcp::clobber(config, test_message())?;
+
+    Ok(())
+}
+
+#[test]
+fn with_fuzz_config() -> std::io::Result<()> {
+    let addr = echo_server()?;
+    let config = ConfigBuilder::new(addr)
+        .connections(1)
+        .threads(Some(1))
+        .limit(Some(10))
+        .fuzz_path(Some(String::from("tests/fuzz_config.toml")))
+        .build();
+
+    tcp::clobber(config, b"foo".to_vec())?;
 
     Ok(())
 }

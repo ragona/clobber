@@ -10,7 +10,7 @@ use clap::{App, Arg, ArgMatches};
 use humantime;
 
 use clobber::util::optional_stdin;
-use clobber::{setup_logger, tcp, Config, ConfigBuilder, Message};
+use clobber::{setup_logger, tcp, Config, ConfigBuilder};
 
 fn main() {
     let cli = cli();
@@ -31,7 +31,7 @@ fn main() {
         None => unimplemented!("no request body"), // todo: Load from file
     };
 
-    tcp::clobber(settings, Message::new(bytes)).expect("Failed to clobber :(");
+    tcp::clobber(settings, bytes).expect("Failed to clobber :(");
 }
 
 fn cli() -> App<'static, 'static> {
@@ -104,6 +104,13 @@ fn cli() -> App<'static, 'static> {
                 .help("Repeats the outgoing message")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("fuzz")
+                .short("f")
+                .long("fuzz")
+                .help("Path to a fuzzing config .toml file")
+                .takes_value(true),
+        )
 }
 
 fn settings_from_argmatches(matches: &ArgMatches) -> Config {
@@ -136,6 +143,11 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .unwrap_or("100")
         .parse::<u32>()
         .expect("Failed to parse connections");
+
+    let fuzz_path = match matches.value_of("fuzz") {
+        None => None,
+        Some(s) => Some(String::from(s)),
+    };
 
     let connect_timeout = match matches.value_of("connect-timeout") {
         Some(timeout) => Some(timeout.parse().expect("Failed to parse connect_timeout")),
@@ -173,6 +185,7 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .repeat(repeat)
         .threads(threads)
         .duration(duration)
+        .fuzz_path(fuzz_path)
         .connections(connections)
         .read_timeout(read_timeout)
         .connect_timeout(connect_timeout)
