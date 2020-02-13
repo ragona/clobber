@@ -74,3 +74,6 @@ data for a long time, and this can block connections. With some protocols (such 
 `Connection: close` that signals to the host that you won't be sending any more requests, and that they should send
 an `EOF` after they've responded. This can fix throughput issues against some HTTP servers. If this isn't possible you
 should configure the `read-timeout`, but this does have a bit of an impact on top-end performance (especially with a high number of connections.)
+
+### End to end design
+

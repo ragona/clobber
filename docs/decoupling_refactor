@@ -1,0 +1,49 @@
+# Refactor to compartmentalize components
+
+Alright, the initial `clobber` architecture was proof-of-concept level, and I think I can
+do better. Specifically, I think that the analysis, mutation, and network components
+are much too tightly coupled. The code also isn't in a great place for benchmarking. 
+I'd like to start with the message passing infrastructure, then add benchmarking, then 
+start layering network code, mutation, and analysis with an eye to performance from the 
+beginning. 
+
+One of my key goals for this project is to be efficient enough that the tool can be 
+used to stress large distributed services without needed to spin up an unreasonable 
+number of hosts, so performance needs to be built into the development process. 
+
+## Components 
+
+Channels:
+
+send_work, recv_work (fuzzer, client)
+send_result, recv_result (client, analysis)
+send_analysis, recv_analysis (analysis, fuzzer)
+
+### Fuzzer 
+
+The fuzzer generates bytes and writes them into the `(send_work, recv_work)` channel. 
+It optionally mutates the output using user-configurable strategies. 
+
+### Client 
+
+Reads bytes from the `(send_work, recv_work)` channel.
+Sends the bytes to the target. 
+Writes result into the `(send_result, recv_result)` channel.
+
+Examples:
+
+- TCP
+- Function 
+
+### Analysis 
+
+Reads results from the `(send_result, recv_result)` channel. 
+Scores the result based on how interesting it thinks it is. 
+Writes analysis to the `(send_analysis, recv_analysis)` channel. 
+
+
+### Concurrency
+
+My current guess is that the part of the program that will need to scale horizontally
+across threads is the client.
+
