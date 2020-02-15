@@ -1,56 +1,54 @@
-//! # Tool for TCP load testing
-//!
-//! The primary goal for `clobber` is speed; we want to make TCP requests as fast as possible. If
-//! you're interested in reading the code, go check out `tcp.rs` for the interesting part!
-//!
-//! This library is used internally by the main.rs binary and the tests, and is not intended for
-//! general use in other projects. (But if you're interested, post an issue; I'd be happy to hear
-//! about it!)
-//!
-//! ## Examples
-//!
-//! ```no_run
-//! # use std::time::Duration;
-//! # use clobber::{tcp, Config, ConfigBuilder};
-//!
-//! let message = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\nConnection: close\r\n\r\n".to_vec();
-//! let addr = "127.0.0.1:8000".parse().unwrap();
-//! let config = ConfigBuilder::new(addr)
-//!     .connections(10)
-//!     .build();
-//!
-//! tcp::clobber(config, message).unwrap();
-//! ```
-//!
-pub mod config;
-pub mod server;
-pub mod stats;
-pub mod tcp;
-pub mod util;
+use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TryRecvError};
+use std::thread;
+use std::time::Duration;
 
-pub use config::{Config, ConfigBuilder};
-pub use stats::Stats;
+pub struct Work {}
+pub struct Result {}
+pub struct Analysis {}
 
-use fern;
-use log::LevelFilter;
+pub fn start(count: usize) {
+    // todo: priority queue for outstanding work
+    let (send_work, recv_work) = bounded(100); // num workers
+    let (send_result, recv_result) = unbounded();
+    let (send_analysis, recv_analysis) = unbounded();
 
-pub fn setup_logger(log_level: LevelFilter) -> Result<(), Box<dyn std::error::Error>> {
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{}[{}][{}] {}",
-                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
-                record.target(),
-                record.level(),
-                message
-            ))
-        })
-        .level(log_level)
-        .chain(std::io::stdout())
-        .chain(fern::log_file("clobber.log")?)
-        .apply()?;
+    work(recv_work, send_result);
+    analyze(recv_result, send_analysis);
 
-    Ok(())
+    let mut i = 0;
+    while i < count {
+        send_work.send(Work {}).unwrap();
+        i += 1;
+    }
 }
 
+pub fn work(recv_work: Receiver<Work>, send_result: Sender<Result>) {
+    thread::spawn(move || {
+        loop {
+            if let Ok(_) = recv_work.try_recv() {
+                // do work
+                send_result.send(Result {}).unwrap();
+            }
+        }
+    });
+}
 
+pub fn analyze(recv_results: Receiver<Result>, send_analysis: Sender<Analysis>) {
+    thread::spawn(move || loop {
+        if let Ok(_) = recv_results.try_recv() {
+            // do analysis
+            send_analysis.send(Analysis {}).unwrap();
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    pub fn foo() {
+        start(100000);
+        dbg!("done");
+    }
+}

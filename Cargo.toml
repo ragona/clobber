@@ -18,17 +18,14 @@ chrono = "0.4.7"
 serde = "1.0.102"
 num_cpus = "1.10.1"
 humantime = "1.2.0"
-async-std = "1.2.0"
-spin_sleep = "0.3.7"
-futures-timer = "0.3.0"
 serde_derive = "1.0.102"
 crossbeam-channel = "0.4.0"
 futures-preview = "0.3.0-alpha.17"
 byte-mutator = "0.1.1" 
 
 [dev-dependencies]
-criterion = "0.2"
+criterion = "0.3.1"
 
 [[bench]]
-name = "clobber_bench"
+name = "base"
 harness = false
