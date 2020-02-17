@@ -1,44 +1,66 @@
-use clobber::{Output, Work};
+use clobber::{Output, Task, Work};
+use futures::prelude::*;
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot};
-use tokio::time::delay_for;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-const NUM_WORKERS: usize = 100;
+const NUM_WORKERS: usize = 8;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (mut work_tx, work_rx) = mpsc::channel(NUM_WORKERS);
-    let (output_tx, mut output_rx) = mpsc::channel(NUM_WORKERS);
+    let jobs = vec![Work::new(10), Work::new(10)];
+    let (task_tx, task_rx) = channel(10);
+    
+    tokio::spawn(async move {
+        generate_work(task_tx, jobs).await;
+    });
 
-    let mut jobs = vec![Work::new(10), Work::new(10)];
+    work(task_rx).await;
 
-    tokio::spawn(workers(work_rx, output_tx));
+    Ok(())
+}
 
+async fn generate_work(mut task_tx: Sender<Task>, mut jobs: Vec<Work>) {
     loop {
-        match output_rx.try_recv() {
-            Ok(out) => {
-                dbg!(out);
-            }
-            _ => {}
-        }
+        // todo: receive results, reorder jobs on priority (or make jobs a heap)
 
-        while !jobs.is_empty() {
-            println!("sent");
-            work_tx.send(jobs.pop().unwrap()).await?;
+        if !jobs.is_empty() {
+            let job = jobs.last_mut().unwrap();
+            match job.next() {
+                Some(task) => {
+                    if let Err(_) = task_tx.send(task).await {
+                        println!("we broke");
+                        break;
+                    }
+                }
+                None => {
+                    jobs.pop().unwrap();
+                }
+            }
+        } else {
+            // todo: This is sort of a race condition where if new work doesn't
+            // show up before all potential new work is found from outstanding 
+            // requests we'll drop out too early.
+            break;
         }
     }
 }
 
-pub async fn workers(mut work_rx: mpsc::Receiver<Work>, output_tx: mpsc::Sender<Output>) {
-    loop {
-        if let Some(job) = work_rx.recv().await {
-            let mut output_tx = output_tx.clone();
-            tokio::spawn(async move {
-                for task in job {
-                    delay_for(Duration::from_millis(10)).await;
-                    output_tx.send(Output {}).await.unwrap();
-                }
-            });
-        }
-    }
+async fn work(task_rx: Receiver<Task>) {
+    task_rx
+        .map(|task| {
+            async move {
+                // pretend to do work
+                tokio::time::delay_for(Duration::from_millis(100)).await;
+
+                // return some results
+                Output { val: task.0 }
+            }
+        })
+        .buffered(NUM_WORKERS)
+        .for_each(|out| {
+            async move {
+                println!("completed {}", out.val)
+            }
+        })
+        .await;
 }

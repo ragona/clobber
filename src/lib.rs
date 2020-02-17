@@ -11,18 +11,30 @@ impl Work {
 }
 
 #[derive(Debug)]
-pub struct Output {}
+pub struct Output {
+    pub val: usize,
+}
+
 pub struct Analysis {}
 
-impl Iterator for Work {
-    type Item = usize;
+#[derive(Debug)]
+pub struct Task(pub usize);
 
-    fn next(&mut self) -> Option<usize> {
+impl From<Task> for usize {
+    fn from(task: Task) -> usize {
+        task.0
+    }
+}
+
+impl Iterator for Work {
+    type Item = Task;
+
+    fn next(&mut self) -> Option<Task> {
         let n = self.cur;
         self.cur += 1;
 
         match n {
-            n if n <= self.amount => Some(n),
+            n if n <= self.amount => Some(Task(n)),
             _ => None,
         }
     }
