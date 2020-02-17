@@ -21,7 +21,8 @@ humantime = "1.2.0"
 serde_derive = "1.0.102"
 crossbeam-channel = "0.4.0"
 futures-preview = "0.3.0-alpha.17"
-byte-mutator = "0.1.1" 
+byte-mutator = "0.1.1"
+tokio = { version = "0.2", features=["full"] }
 
 [dev-dependencies]
 criterion = "0.3.1"
