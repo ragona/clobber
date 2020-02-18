@@ -75,5 +75,3 @@ data for a long time, and this can block connections. With some protocols (such 
 an `EOF` after they've responded. This can fix throughput issues against some HTTP servers. If this isn't possible you
 should configure the `read-timeout`, but this does have a bit of an impact on top-end performance (especially with a high number of connections.)
 
-### End to end design
-
