@@ -23,6 +23,7 @@
 //! ```
 //!
 pub mod config;
+pub mod net;
 pub mod stats;
 pub mod util;
 
