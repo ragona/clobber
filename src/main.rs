@@ -10,7 +10,7 @@ use clobber::{self, setup_logger, Config, ConfigBuilder};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = cli();
     let matches = cli.get_matches();
-    let settings = settings_from_argmatches(&matches);
+    let config = settings_from_argmatches(&matches);
 
     let log_level = match &matches.occurrences_of("v") {
         1 => log::LevelFilter::Info,
@@ -25,8 +25,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(bytes) => bytes,
         None => unimplemented!("no request body"), // todo: Load from file
     };
-    
-    clobber::go(8).await?;
+
+    clobber::go(config, bytes).await?;
 
     Ok(())
 }

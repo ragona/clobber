@@ -11,7 +11,7 @@
 //!
 //! ```no_run
 //! # use std::time::Duration;
-//! # use clobber::{tcp, Config, ConfigBuilder};
+//! # use clobber::{self, Config, ConfigBuilder};
 //!
 //! let message = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\nConnection: close\r\n\r\n".to_vec();
 //! let addr = "127.0.0.1:8000".parse().unwrap();
@@ -19,7 +19,7 @@
 //!     .connections(10)
 //!     .build();
 //!
-//! tcp::clobber(config, message).unwrap();
+//! // clobber::go(config, message).await?;
 //! ```
 //!
 pub mod config;
@@ -29,9 +29,11 @@ pub mod util;
 pub use config::{Config, ConfigBuilder};
 pub use stats::Stats;
 
+use byte_mutator::fuzz_config::FuzzConfig;
+use byte_mutator::ByteMutator;
 use fern;
-use log::LevelFilter;
 use futures::prelude::*;
+use log::LevelFilter;
 use std::time::Duration;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
@@ -53,7 +55,6 @@ pub fn setup_logger(log_level: LevelFilter) -> Result<(), Box<dyn std::error::Er
 
     Ok(())
 }
-
 
 #[derive(Debug)]
 pub struct Work {
@@ -97,15 +98,23 @@ impl Iterator for Work {
     }
 }
 
-pub async fn go(worker_count: usize) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn go(config: Config, message: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
     let jobs = vec![Work::new(10), Work::new(10)];
     let (task_tx, task_rx) = channel(10);
-    
+
+    let message = match &config.fuzz_path {
+        None => ByteMutator::new(&message),
+        Some(path) => match FuzzConfig::from_file(&path) {
+            Ok(fuzz_config) => ByteMutator::new_from_config(&message, fuzz_config),
+            Err(e) => return Err(e.into()),
+        },
+    };
+
     tokio::spawn(async move {
         generate_work(task_tx, jobs).await;
     });
 
-    work(task_rx, worker_count).await;
+    work(task_rx, config.workers as usize).await;
 
     Ok(())
 }
@@ -129,7 +138,7 @@ async fn generate_work(mut task_tx: Sender<Task>, mut jobs: Vec<Work>) {
             }
         } else {
             // todo: This is sort of a race condition where if new work doesn't
-            // show up before all potential new work is found from outstanding 
+            // show up before all potential new work is found from outstanding
             // requests we'll drop out too early.
             break;
         }
@@ -148,11 +157,7 @@ async fn work(task_rx: Receiver<Task>, worker_count: usize) {
             }
         })
         .buffered(worker_count)
-        .for_each(|out| {
-            async move {
-                println!("completed {}", out.val)
-            }
-        })
+        .for_each(|out| async move { println!("completed {}", out.val) })
         .await;
 }
 

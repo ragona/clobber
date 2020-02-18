@@ -17,10 +17,8 @@ use serde_derive::Deserialize;
 pub struct Config {
     /// Socket address (ip and port) of the host we'll be calling
     pub target: SocketAddr,
-    /// Connections is the a key knob to turn when tuning a performance test. Honestly
-    /// 'connections' isn't the best name; it implies a certain persistance that isn't true.
-    /// todo: Rename to workers?
-    pub connections: u32,
+    /// Number of active workers. (Note: consider max number of open ports and files when setting this)
+    pub workers: u32,
     /// Optional rate-limiting. Precisely timing high rates is unreliable; if you're
     /// seeing slower than expected performance try running with no rate limit at all.
     pub rate: Option<u32>,
@@ -36,7 +34,7 @@ pub struct Config {
     /// Optionally time out read requests at a number of milliseconds. Note: checking timeouts
     /// costs CPU cycles; max performance will suffer. However, if you have an ill-behaving server
     /// that isn't sending EOF bytes or otherwise isn't dropping connections, this can be
-    /// essential to maintaing a high(ish) throughput, at the cost of more CPU load.
+    /// essential to maintaining a high(ish) throughput, at the cost of more CPU load.
     pub read_timeout: Option<u32>,
     /// Absolute number of requests to be made. Should split evenly across threads.
     pub limit: Option<u32>,
@@ -51,7 +49,7 @@ impl Config {
         let connections = 100; // todo: detect?
         Config {
             target,
-            connections,
+            workers: connections,
             rate: None,
             limit: None,
             repeat: 1,
@@ -74,7 +72,7 @@ impl Config {
     /// Number of connection loops each thread should maintain. Will never be less than the number
     /// of threads.
     pub fn connections_per_thread(&self) -> u32 {
-        match self.connections / self.num_threads() as u32 {
+        match self.workers / self.num_threads() as u32 {
             0 => 1,
             n => n,
         }
@@ -96,7 +94,7 @@ impl Config {
     pub fn limit_per_connection(&self) -> Option<u32> {
         match self.limit {
             None => None,
-            Some(n) => Some(n / self.connections),
+            Some(n) => Some(n / self.workers),
         }
     }
 }
@@ -118,7 +116,7 @@ impl ConfigBuilder {
     }
 
     pub fn connections(mut self, connections: u32) -> ConfigBuilder {
-        self.config.connections = connections;
+        self.config.workers = connections;
         self
     }
 
