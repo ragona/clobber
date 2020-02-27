@@ -24,3 +24,4 @@ futures = "0.3.4"
 byte-mutator = "0.1.1"
 tokio = { version = "0.2", features=["full"] }
 tokio-test = "0.2.0"
+bytes = "0.5.4"
