@@ -1,7 +1,7 @@
-use crate::Config;
-use crossbeam_channel::{bounded, TryRecvError};
+use crate::config::Config;
+use crossbeam_channel::{bounded, Receiver, TryRecvError};
+use log::{debug, error, info, warn};
 use std::net::SocketAddr;
-use tokio::prelude::*;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -27,71 +27,74 @@ pub async fn request(
     Ok(())
 }
 
-async fn load(settings: Config, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    let (work_tx, work_rx) = bounded(10);
+/// Worker pool that handles incoming tcp requests
+/// Open question how to best share bytes between separate threads
+/// `Bytes` looks promising; cloneable handle?
+///
+/// Goal is to decouple this from the mutators generating the bytes
+/// And ALSO keep it separate from the analysis happening to the return value
+/// I suspect the analysis may be CPU intensive in a way that does not play
+/// nicely with this worker loop, so I'd like to isolate it in a different os thread.
+/// (Need to measure.)
+///
+pub async fn load(
+    config: Config,
+    work_rx: Receiver<()>,
+    bytes: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("beginning tcp workers");
+    info!("{:?}", config);
 
-    for i in 0..settings.workers {
+    for i in 0..config.workers {
         let rx = work_rx.clone();
         let bytes = bytes.to_vec();
-        let settings = settings.clone();
+        let config = config.clone();
         let mut read_buf = [0u8; 1024];
 
         tokio::spawn(async move {
             loop {
                 if let Err(e) = rx.try_recv() {
                     if let TryRecvError::Disconnected = e {
+                        info!("worker loop {} broken", i);
                         break;
                     }
                 }
 
-                match request(settings.target, &bytes, &mut read_buf).await {
-                    Ok(_) => {}
-                    Err(_) => {}
+                match request(config.target, &bytes, &mut read_buf).await {
+                    Ok(_) => {
+                        // todo: Analysis thread needs access to read_buf
+                        // Perhaps this should actually be heap allocated? Measure.
+                    }
+                    Err(e) => {
+                        warn!("{}", e);
+                    }
                 }
             }
         });
     }
 
-    loop {
-        match work_tx.send(()) {
-            Ok(x) => {}
-            Err(e) => {}
-        }
-    }
-
     Ok(())
-}
-
-pub async fn tcp_write_read(addr: SocketAddr, data: &[u8], read_buf: &mut [u8]) {
-    let stream = TcpStream::connect(addr).await;
-    if let Err(e) = stream {
-        dbg!(e);
-        return;
-    }
-
-    let mut stream = stream.unwrap();
-
-    match stream.write_all(data).await {
-        Err(e) => {
-            dbg!(e);
-            return;
-        }
-        _ => {}
-    }
-
-    match stream.read(read_buf).await {
-        Err(e) => {
-            dbg!(e);
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]
 mod test {
+    use super::*;
+    use crate::ConfigBuilder;
 
     #[tokio::test]
-    pub async fn foo() {
-        //
+    pub async fn test_load() -> Result<(), Box<dyn std::error::Error>> {
+        let config = ConfigBuilder::new("0.0.0.0:8000".parse().unwrap())
+            .workers(1)
+            .build();
+
+        let (tx, rx) = bounded(10);
+
+        for _ in 0..10 {
+            tx.send(()).expect("Failed to send");
+        }
+
+        load(config, rx, b"foo").await?;
+
+        Ok(())
     }
 }

@@ -115,8 +115,8 @@ impl ConfigBuilder {
         self.config
     }
 
-    pub fn connections(mut self, connections: u32) -> ConfigBuilder {
-        self.config.workers = connections;
+    pub fn workers(mut self, workers: u32) -> ConfigBuilder {
+        self.config.workers = workers;
         self
     }
 

@@ -16,7 +16,7 @@
 //! let message = b"GET / HTTP/1.1\r\nHost: localhost:8000\r\nConnection: close\r\n\r\n".to_vec();
 //! let addr = "127.0.0.1:8000".parse().unwrap();
 //! let config = ConfigBuilder::new(addr)
-//!     .connections(10)
+//!     .workers(10)
 //!     .build();
 //!
 //! // clobber::go(config, message).await?;

@@ -183,7 +183,7 @@ fn settings_from_argmatches(matches: &ArgMatches) -> Config {
         .threads(threads)
         .duration(duration)
         .fuzz_path(fuzz_path)
-        .connections(connections)
+        .workers(connections)
         .read_timeout(read_timeout)
         .connect_timeout(connect_timeout)
         .build()
