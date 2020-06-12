@@ -35,7 +35,7 @@ Sometimes the guesses are very good and rarely need tuning because the environme
 ## Control Systems theory
 
 I was introduced to control systems theory by Colm MacCartheigh when I was at AWS.
-He has an excellent publically available talk on the subject, and I highly recommend that you watch it. Colm convinced me that there is an entire field of scientific thought out there that is nearly directly applicable to the work today's software engineer does on distributed systems, and that we're mostly ignoring it. 
+He has an [excellent publically available talk](https://www.youtube.com/watch?v=3AxSwCC7I4s) on the subject, and I highly recommend that you watch it. Colm convinced me that there is an entire field of scientific thought out there that is nearly directly applicable to the work today's software engineer does on distributed systems, and that we're mostly ignoring it. 
 
 Control theory is the study of dynamic systems and how they can be controlled. 
 If you watch YouTube videos you'll decide it's the study of thermostats;
