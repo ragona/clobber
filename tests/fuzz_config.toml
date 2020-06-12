@@ -1,6 +1,0 @@
-[[stages]]
-    count = 0
-    iterations = "Unlimited"
-    # a list of mutations to perform on this stage
-    [[stages.mutations]]
-    mutation = {"BitFlipper" = {width = 1}}
