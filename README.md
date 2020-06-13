@@ -7,7 +7,7 @@ This branch is a full rewrite of `clobber`, which is a tcp stress testing tool.
 This project started with the thought, "I wonder how many http requests I can make per second with async rust?"
 
 At the time, async hadn't landed to stable rust, so we were in the wild west. 
-I tried out both `async-std` and the async branch of `tokio`, did a bit of tuning, and 
+I tried out traditional threading, futures, both `async-std` and the async branch of `tokio`, did a bit of tuning, and 
 was able to confirm that yep, you can make http requests really, really fast with rust.
 I still had to do all of the concurrency loop tuning that you'd do in any language, but relatively naive implementations produced high requests per second (rps) right out of the gate. 
 
