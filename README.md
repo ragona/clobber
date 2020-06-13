@@ -13,14 +13,18 @@ I still had to do all of the concurrency loop tuning that you'd do in any langua
 
 I even had to invest in finding faster targets to test, since many simple web services cap out in the low tens of thousands or even thousands of rps. (Note: `python3 -m http.server` is not a good test subject.) 
 
-As I tinker away on `clobber` I've approached the problem of how to produce the highest numbers from a few angles, and I keep coming back to one problem. 
+As I tinker away on `clobber` I've approached the problem of how to get the highest numbers from several angles, and I keep coming back to a fundamental question in concurrency:
 
-## How many of the thing?  
+## How many at once?  
 
-I've written this loop every way I can think, with dozens of small variations that matter.
-But it doesn't matter whether I use os threads, async workers, futures with an executor, I always end up needing to fiddle with how many of the unit of computation I have. 
+We know making a lot of network requests is a problem for concurrency. 
+But how many requests should we make at once?  
+Threads, futures, async, we can get good numbers with any option, but they all require us to answer this question correctly. 
 
-It's a fundamental problem in distributed services -- how many workers?
+I've written this core loop at least a dozen different ways, with countless small variations that matter.
+I always end up needing to fiddle with how many of the unit of computation I have. 
+
+This is a fundamental problem in distributed services -- how many workers?
 How many threads? What's the size of the pool? 
 There's no perfect answer.
 If you set the number too low you'll have low throughput and underutilized hardware.
@@ -31,10 +35,10 @@ If you add a small amount of latency to a system the correct number of workers s
 They're just wrong, and they limp along sub-optimally. 
 
 Look around in the systems that you work on -- you'll find this idea hardcoded all over the place. 
-How many connections, how many ports, how big is the buffered channel.
+How many connections, how many ports, open file descriptors, how big is the buffered channel.
 They're all the same thing; attempts to guess how many things to use.
 
-Sometimes the guesses are very good and rarely need tuning because the environment won't change often, and sometimes they're incorrect and are the single bottleneck for your entire system.
+Sometimes the guesses are very good and rarely need tuning (usually because the environment won't change often), and sometimes they're incorrect and are the single bottleneck for your entire system.
 
 ## Control Systems theory
 
