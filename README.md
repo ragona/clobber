@@ -21,8 +21,10 @@ We know making a lot of network requests is a time for concurrency.
 But how many requests should we make at once? 
 Threads, futures, async -- all techniques require us to answer this question correctly. 
 
-This is a fundamental problem in distributed services -- how many workers?
-How many threads? What's the size of the pool? 
+This is a fundamental problem in distributed services.
+How many workers?
+How many threads? 
+What's the size of the pool? 
 There's no perfect answer.
 If you set the number too low you'll have low throughput and underutilized hardware.
 It you set the number too high the workers will start to contend with each other for some resource or other and you'll waste CPU stepping on your own toes.
@@ -33,7 +35,7 @@ They're just wrong, and they limp along sub-optimally.
 
 Look around in the systems that you work on -- you'll find this idea hardcoded all over the place. 
 How many connections, how many ports, open file descriptors, how big is the buffered channel.
-They're all the same thing; attempts to guess how many things to use.
+They're all the same thing; attempts to guess how many things to use at once.
 
 Sometimes the guesses are very good and rarely need tuning (usually because the environment won't change often), and sometimes they're incorrect and are the single bottleneck for your entire system.
 
