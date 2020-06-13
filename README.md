@@ -13,16 +13,13 @@ I still had to do all of the concurrency loop tuning that you'd do in any langua
 
 I even had to invest in finding faster targets to test, since many simple web services cap out in the low tens of thousands or even thousands of rps. (Note: `python3 -m http.server` is not a good test subject.) 
 
-As I tinker away on `clobber` I've approached the problem of how to get the highest numbers from several angles, and I keep coming back to a fundamental question in concurrency:
+As I tinker away on `clobber` I've approached the problem of how to get the highest throughput from several angles, and I keep coming back to a fundamental question in concurrency:
 
 ## How many at once?  
 
-We know making a lot of network requests is a problem for concurrency. 
-But how many requests should we make at once?  
-Threads, futures, async, we can get good numbers with any option, but they all require us to answer this question correctly. 
-
-I've written this core loop at least a dozen different ways, with countless small variations that matter.
-I always end up needing to fiddle with how many of the unit of computation I have. 
+We know making a lot of network requests is a time for concurrency. 
+But how many requests should we make at once? 
+Threads, futures, async -- all techniques require us to answer this question correctly. 
 
 This is a fundamental problem in distributed services -- how many workers?
 How many threads? What's the size of the pool? 
