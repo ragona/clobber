@@ -15,7 +15,7 @@ I even had to invest in finding faster targets to test, since many simple web se
 
 As I tinker away on `clobber` I've approached the problem of how to produce the highest numbers from a few angles, and I keep coming back to one problem. 
 
-## How many of the thing do I use?  
+## How many of the thing?  
 
 I've written this loop every way I can think, with dozens of small variations that matter.
 But it doesn't matter whether I use os threads, async workers, futures with an executor, I always end up needing to fiddle with how many of the unit of computation I have. 
@@ -28,6 +28,7 @@ It you set the number too high the workers will start to contend with each other
 
 Maddeningly, it will also change! The environment has a huge impact. 
 If you add a small amount of latency to a system the correct number of workers suddenly changes, and many systems don't have a way to control for that. 
+They're just wrong, and they limp along sub-optimally. 
 
 Look around in the systems that you work on -- you'll find this idea hardcoded all over the place. 
 How many connections, how many ports, how big is the buffered channel.
