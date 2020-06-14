@@ -70,12 +70,66 @@ To wikipedia!
 
 ![PID Controller](https://upload.wikimedia.org/wikipedia/commons/4/43/PID_en.svg)
 
+Don't worry, we can break this down. 
 These kinds of formulas used to freak me out, but after spending enough time working with cryptographers I realized mathmeticans are just programmers who prefer walls to computers.
 The poor dears work on chalkboards and haven't the typing speed to use what we would consider polite variable names, so they resort to the greek alphabet to avoid multi-letter variables.
 If you had to write all of your variables with chalk you'd use funny letters too.
 
-These are my live notes as I translate the above formula into pseudocode.
-Here are the areas of the equation.
+Each of the three major areas is an independent controller that uses its own strategy to move us towards our goal value. 
+Together they make up a PID controller, but we could also use a proportional controller on its own -- it just wouldn't have the integral or derivative functions to shore up its weaknesses.
+
+### Formula notes 
+As I start turning this formula into code there are a couple of things to keep in mind that will help it make sense.
+
+#### Time
+Notice how we have "t" all over the place? This whole bonkers looking equation is just a for loop. `t` represents time, and the first part of the integral (`0∫t`) declares `for 0 to t`.
+
+We can approach time differently from mathmeticians. 
+In pseudocode I'll take time out of the equations and assume that it's a member variable of a struct.
+I'll poll this module at some interval and get its recommendation on the correct number of workers. 
+Anywhere that has `e(t)` can simply become `e` or `error` for readability.
+
+#### What is with `K` everywhere
+This is a constant that allows us to tune the "gain" or strength of each controller.
+
+### Proportional
+```
+Kp e(t)
+```
+
+This is the first and simpliest of our three independent controllers. 
+Just by using more human names for the variables and removing time from the equation we get:
+
+```
+gain * error
+```
+
+For this controller the error is simply `goal - current`. 
+If we're hoping to perform a loadtest at 100 rps and our gain is set to 1.0, then as soon as our test starts we'll jump to correct the error and add 100 workers. 
+Okay, too aggressive, but the idea makes sense.
+
+### Integral
+```
+Ki 0∫t e(t)dt
+```
+
+Alright, most of the complexity on this one is actually just the math equivalent of curly braces and loop declarations to reason about time. 
+But what is that `dt` at the end there? 
+[StackExchange](https://math.stackexchange.com/questions/1479059/what-is-the-difference-between-d-dt-and-dy-dt) has us covered.
+
+`dt` is the differential operator; it's some math shit that is approximately a semicolon. 
+The important thing to remember here is that this controller looks at error **over time**, so we'll need to do that too and add to the error every time instead of recalculating it. 
+
+If we strip all of that we're left with:
+
+```
+gain * error 
+```
+
+Oh, sure. Same idea as the first one, but this time we track error over time instead of just looking at the current gap.
+
+### Derivative
+- `Kd de(t) / dt`: Derivative
 
 ### Goal (target rps)
 ```
@@ -89,50 +143,8 @@ y(t)
 ```
 The current state of the system, or process value (`PV`). 
 
-### Error
-```
-e(t)
-error = goal - current`
-```
-
-The funny E (`Σ` / "sigma") usually means sum. It's being used as an accumulator here to track our error value over time. 
-
-So `e` at a given point in time will be equal to the accumulator minus the measured value plus the goal value. If the accumulator were zero, say when the controller first starts, then it's simply `goal - current`. 
-
-Intuitively that makes sense. If our goal is 10 and our current state is 10 then we have no error. The error is the difference between where we are and where we want to be.
-
-### Proportional
-- `Kp e(t)`: Proportional
-
-I wonder why the author of this formula felt compelled to put gigantic `K` in front of all of the variable names. 
-Maybe it has something to do with the time series nature of it.
-It says `pid` right there, but the `K` is so large that you could easily miss it.
-
-Oh, `K` is a constant, also called `gain`. I'll call it gain since it gives readers at least some idea what they're looking at.
-
-The proportional controller is something like this:
-```
-const GAIN: f32 = 1.0
-
-fn proportional(goal, current) {
-   error = goal - current
-   return GAIN * error
-}
-```
-
-If we're hoping to perform a loadtest at 100 rps and our gain is set to 1.0, then as soon as our test starts we'll jump to correct the error and add 100 workers. 
-Okay, probably a little aggressive, but the idea makes sense.
-
-### Integral
-- `Ki 0∫t e(t)dt`: Integral
-
-### Derivative
-- `Kd de(t) / dt`: Derivative
-
 ### Output (workers)
 - `u(t)`: Output
 
-
-Notice how we have "t" all over the place? This whole bonkers looking equation is just a for loop. `t` represents time, and the first part of the integral (`0∫t`) declares `for 0 to t`.
 
 
