@@ -92,6 +92,27 @@ Anywhere that has `e(t)` can simply become `e` or `error` for readability.
 #### What is with `K` everywhere
 This is a constant that allows us to tune the "gain" or strength of each controller.
 
+### Goal (target rps)
+```
+r(t)
+```
+Our goal, also sometimes called set point (`SP`). In our case, this is how many rps we want to achieve.
+
+### Current (current rps)
+```
+y(t)
+```
+The current state of the system, or process value (`PV`). 
+
+### Output (workers)
+- `u(t)`: Output
+
+### Error 
+```
+e(t)
+```
+Error is `goal - current`. If we wanted to make 100 requests per second and we just started at zero, then the error is 100.
+
 ### Proportional
 ```
 Kp e(t)
@@ -129,22 +150,28 @@ gain * error
 Oh, sure. Same idea as the first one, but this time we track error over time instead of just looking at the current gap.
 
 ### Derivative
-- `Kd de(t) / dt`: Derivative
+```
+Kd de(t) / dt
+```
 
-### Goal (target rps)
-```
-r(t)
-```
-Our goal, also sometimes called set point (`SP`). In our case, this is how many rps we want to achieve.
+I'm not gonna try to explain the calculus here.
+Expressing the future on a chalkboard is hard, and I got kicked out of high school.
 
-### Current (current rps)
-```
-y(t)
-```
-The current state of the system, or process value (`PV`). 
+But the derivative controller is neat! 
+Where the other controllers look at what the error is or has been, the derivative controller looks at how fast the error is changing and it tries to stop that change. 
 
-### Output (workers)
-- `u(t)`: Output
+It's a counterbalance for the other two controllers going too ham.
+
+This expression is saying:
+
+```
+gain * (error - last_error) 
+```
+
+Let's go over the example where we'd just started a loadtest of 100 rps.
+Pretend our first two data points were 0 and 20 so `error - last_error` is `80 - 100` or `-20`. 
+If the derivative gain (remember, we want to be able to play with the strength of each of the three controllers independently) is 1.0, then this controller's input will be a reduction in workers by 20.
+
 
 
 
