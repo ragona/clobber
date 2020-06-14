@@ -81,13 +81,13 @@ Here are the areas of the equation.
 ```
 r(t)
 ```
-Our goal, or "set point (`SP`)". In our case, this is how many rps we want to achieve.
+Our goal, or set point (`SP`). In our case, this is how many rps we want to achieve.
 
 ### Current (current rps)
 ```
 y(t)
 ```
-THe current state of the system, or "process value (`PV`)"
+The current state of the system, or process value (`PV`)
 
 ### Error
 ```
