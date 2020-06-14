@@ -68,7 +68,7 @@ It's a tool for situations when the answer to "how many" isn't obvious, or you e
 I want a PID controller to solve my number of workers problem, so I need to build a PID controller.
 To wikipedia! 
 
-[!PID Controller](./docs/pid.png)
+[!PID Controller]("https://raw.githubusercontent.com/ragona/clobber/clobber-2-the-streets/docs/pid.png")
 
 These kinds of formulas used to freak me out, but after spending enough time working with cryptographers I realized mathmeticans are just programmers who prefer walls to computers.
 The poor dears work on chalkboards and haven't the typing speed to use what we would consider polite variable names, so they resort to the greek alphabet to avoid multi-letter variables.
