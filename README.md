@@ -55,10 +55,66 @@ There are hardware controllers (look up PID controller) all over the world that 
 
 Controllers for these situations are highly studied things, and the thinking behind them has lessons for the way that we build distributed software systems. As I reimplement `clobber` from the ground up, I want to try to use those lessons to answer "how many of the thing".
 
-## Back to `clobber`
+# `clobber` technical design
 
 `clobber` is now a library about dynamically tuning concurrent workloads to achieve a target throughput.
 It's a tool for situations when the answer to "how many" isn't obvious, or you expect that the answer will shift as the system's environment changes. 
 
-## Technical design
-We measure some shit and turn some dials till it works nice. 
+## Making a PID controller 
+
+I want a PID controller to solve my number of workers problem, so I need to build a PID controller.
+To wikipedia! 
+
+[!PID Controller](https://upload.wikimedia.org/wikipedia/commons/4/43/PID_en.svg)
+
+These kinds of formulas used to freak me out, but after spending enough time working with cryptographers I realized mathmeticans are just programmers who prefer walls to computers.
+The poor dears work on chalkboards and haven't the typing speed to use what we would consider polite variable names, so they resort to the greek alphabet to avoid multi-letter variables.
+If you had to write all of your variables with chalk you'd use funny letters too.
+
+These are my live notes as I translate the above formula into pseudocode.
+Here are the areas of the equation.
+
+### Goal (target rps)
+```
+r(t)
+```
+Our goal, or "set point (`SP`)". In our case, this is how many rps we want to achieve.
+
+### Current (current rps)
+```
+y(t)
+```
+THe current state of the system, or "process value (`PV`)"
+
+### Error
+```
+e(t)
+error = goal - current`
+```
+
+The funny E (`Σ` / "sigma") usually means sum. It's being used as an accumulator here to track our error value over time. 
+
+So `e` at a given point in time will be equal to the accumulator minus the measured value plus the goal value. If the accumulator were zero, say when the controller first starts, then it's simply `goal - current`. 
+
+Intuitively that makes sense. If our goal is 10 and our current state is 10 then we have no error. The error is the difference between where we are and where we want to be.
+
+### Proportional
+- `Kp e(t)`: Proportional
+
+I wonder why the author if this formula felt compelled to put gigantic `K` in front of all of the variable names. 
+Maybe it has something to do with the time series nature of it.
+It says `pid` right there, but the `K` is so large that you could easily miss it.
+
+### Integral
+- `Ki 0∫t e(t)dt`: Integral
+
+### Derivative
+- `Kd de(t) / dt`: Derivative
+
+### Output (workers)
+- `u(t)`: Output
+
+
+Notice how we have "t" all over the place? This whole bonkers looking equation is just a for loop. `t` represents time, and the first part of the integral (`0∫t`) declares `for 0 to t`.
+
+
