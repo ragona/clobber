@@ -81,13 +81,13 @@ Here are the areas of the equation.
 ```
 r(t)
 ```
-Our goal, or set point (`SP`). In our case, this is how many rps we want to achieve.
+Our goal, also sometimes called set point (`SP`). In our case, this is how many rps we want to achieve.
 
 ### Current (current rps)
 ```
 y(t)
 ```
-The current state of the system, or process value (`PV`)
+The current state of the system, or process value (`PV`). 
 
 ### Error
 ```
@@ -104,9 +104,24 @@ Intuitively that makes sense. If our goal is 10 and our current state is 10 then
 ### Proportional
 - `Kp e(t)`: Proportional
 
-I wonder why the author if this formula felt compelled to put gigantic `K` in front of all of the variable names. 
+I wonder why the author of this formula felt compelled to put gigantic `K` in front of all of the variable names. 
 Maybe it has something to do with the time series nature of it.
 It says `pid` right there, but the `K` is so large that you could easily miss it.
+
+Oh, `K` is a constant, also called `gain`. I'll call it gain since it gives readers at least some idea what they're looking at.
+
+The proportional controller is something like this:
+```
+const GAIN: f32 = 1.0
+
+fn proportional(goal, current) {
+   error = goal - current
+   return GAIN * error
+}
+```
+
+If we're hoping to perform a loadtest at 100 rps and our gain is set to 1.0, then as soon as our test starts we'll jump to correct the error and add 100 workers. 
+Okay, probably a little aggressive, but the idea makes sense.
 
 ### Integral
 - `Ki 0∫t e(t)dt`: Integral
