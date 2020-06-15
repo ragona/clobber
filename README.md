@@ -1,19 +1,7 @@
 # `clobber`
 
-This branch is a full rewrite of `clobber`, which is a tcp stress testing tool.
-
-## Why a rewrite?
-
-This project started with the thought, "I wonder how many http requests I can make per second with async rust?"
-
-At the time, async hadn't landed to stable rust, so we were in the wild west. 
-I tried out traditional threading, futures, both `async-std` and the async branch of `tokio`, did a bit of tuning, and 
-was able to confirm that yep, you can make http requests really, really fast with rust.
-I still had to do all of the concurrency loop tuning that you'd do in any language, but relatively naive implementations produced high requests per second (rps) right out of the gate. 
-
-I even had to invest in finding faster targets to test, since many simple web services cap out in the low tens of thousands or even thousands of rps. (Note: `python3 -m http.server` is not a good test subject.) 
-
-As I tinker away on `clobber` I've approached the problem of how to get the highest throughput from several angles, and I keep coming back to a fundamental question in concurrency:
+`clobber` is a library about dynamically tuning concurrent workloads. 
+It's a tool for situations when the answer to "how many workers?" isn't obvious, or you expect that the answer will shift as the system's environment changes. 
 
 ## How many at once?  
 
@@ -57,12 +45,6 @@ How many units of work should the controller apply to the furnace to make your h
 There are hardware controllers (look up PID controller) all over the world that respond to dynamic conditions to control vehicles, massive industrial systems -- human-eating heavy equipment that must be precise. 
 
 Controllers for these situations are highly studied things, and the thinking behind them has lessons for the way that we build distributed software systems. As I reimplement `clobber` from the ground up, I want to try to use those lessons to answer "how many of the thing".
-
-# `clobber` technical design
-
-`clobber` is now a library about dynamically tuning concurrent workloads to achieve a target throughput.
-It's a tool for situations when the answer to "how many" isn't obvious, or you expect that the answer will shift as the system's environment changes. 
-
 ## Making a PID controller 
 
 I want a PID controller to solve my number of workers problem, so I need to build a PID controller.
@@ -138,7 +120,7 @@ Alright, most of the complexity on this one is actually just the math equivalent
 But what is that `dt` at the end there? 
 [StackExchange](https://math.stackexchange.com/questions/1479059/what-is-the-difference-between-d-dt-and-dy-dt) has us covered.
 
-`dt` is the differential operator; it's some math shit that is approximately a semicolon. 
+`dt` is the differential operator; it's notation relating to the fact that we're operating on a data set.
 The important thing to remember here is that this controller looks at error **over time**, so we'll need to do that too and add to the error every time instead of recalculating it. 
 
 If we strip all of that we're left with:
@@ -154,24 +136,66 @@ Oh, sure. Same idea as the first one, but this time we track error over time ins
 Kd de(t) / dt
 ```
 
-I'm not gonna try to explain the calculus here.
-Expressing the future on a chalkboard is hard, and I got kicked out of high school.
-
-But the derivative controller is neat! 
 Where the other controllers look at what the error is or has been, the derivative controller looks at how fast the error is changing and it tries to stop that change. 
 
-It's a counterbalance for the other two controllers going too ham.
-
-This expression is saying:
-
 ```
-gain * (error - last_error) 
+error_delta = (error - last_error) 
+gain * error_delta
 ```
 
-Let's go over the example where we'd just started a loadtest of 100 rps.
-Pretend our first two data points were 0 and 20 so `error - last_error` is `80 - 100` or `-20`. 
-If the derivative gain (remember, we want to be able to play with the strength of each of the three controllers independently) is 1.0, then this controller's input will be a reduction in workers by 20.
+It's a counterbalance for the other two. 
+And it's still pretty much `gain * error`.
 
+Let's go over the example where we'd just started a loadtest with a goal rate of 100 rps.
+It's the second tick. 
+Our first two data points were 0 and 20, so `error - last_error` is `80 - 100` or `-20`. 
+If the derivative gain (`Kd`) is 1.0, then this controller's input will be a reduction in workers by 20.
 
+## Putting it together
 
+```rust
+enum type {
+    proportional
+    integral
+    derivative
+}
 
+struct controller {
+    type: type, 
+    gain: f32, 
+    error: f32,
+}
+
+fn (c controller) update(goal, current) {
+    c.error = match c.type => {
+       type::proportional => goal - current, 
+       type::integral => ((goal - current) + c.error) / 2
+       type::derivative => (goal - current) - c.error
+    }
+}
+
+fn (c controller) output() {
+    return c.gain * c.error
+}
+
+p = controller(type::proportional, 0.2, 0.0)
+i = controller(type::integral, 2.0, 0.0)
+d = controller(type::derivative, 1.0, 0.0)
+
+fn pid() {
+    return p.output() + i.output() + d.output()
+}
+
+loop {
+    p.update(goal, current)
+    i.update(goal, current)
+    d.update(goal, current)
+
+    best_guess = pid()
+
+    sleep(1s)
+}
+```
+
+If you'll forgive me some pseudocode sins I think that's a pretty succinct representation of a PID controller. 
+The liberty I'm taking here is in calling at a fixed interval and simply integrating and deriving one step at a time, which dramatically simplifies each formula.
