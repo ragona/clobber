@@ -154,48 +154,71 @@ If the derivative gain (`Kd`) is 1.0, then this controller's input will be a red
 ## Putting it together
 
 ```rust
-enum type {
-    proportional
-    integral
-    derivative
+enum ControllerType {
+    Proportional,
+    Integral,
+    Derivative,
 }
 
-struct controller {
-    type: type, 
-    gain: f32, 
-    error: f32,
+struct Controller {
+    pub controller_type: ControllerType,
+    pub gain: f32,
+    pub error: f32,
 }
 
-fn (c controller) update(goal, current) {
-    c.error = match c.type => {
-       type::proportional => goal - current, 
-       type::integral => ((goal - current) + c.error) / 2
-       type::derivative => (goal - current) - c.error
+impl Controller {
+    pub fn new(controller_type: ControllerType, gain: f32) -> Self {
+        Self {
+            controller_type,
+            gain,
+            error: 0.0,
+        }
+    }
+
+    pub fn update(&mut self, error: f32) {
+        self.error = match self.controller_type {
+            ControllerType::Proportional => error,
+            ControllerType::Integral => (error + self.error) / 2.0,
+            ControllerType::Derivative => error - self.error,
+        }
+    }
+
+    pub fn output(&self) -> f32 {
+        self.error * self.gain
     }
 }
 
-fn (c controller) output() {
-    return c.gain * c.error
+pub struct PidController {
+    p: Controller,
+    i: Controller,
+    d: Controller,
 }
 
-p = controller(type::proportional, 0.2, 0.0)
-i = controller(type::integral, 2.0, 0.0)
-d = controller(type::derivative, 1.0, 0.0)
+impl PidController {
+    /// Creates a new PidController with the provided `gain` tuple.
+    /// Gain is used to balance the respective volume of each controller.
+    pub fn new(gain: (f32, f32, f32)) -> Self {
+        let (p_gain, i_gain, d_gain) = gain;
+        Self {
+            p: Controller::new(ControllerType::Proportional, p_gain),
+            i: Controller::new(ControllerType::Integral, i_gain),
+            d: Controller::new(ControllerType::Derivative, d_gain),
+        }
+    }
 
-fn pid() {
-    return p.output() + i.output() + d.output()
+    pub fn update(&mut self, goal: f32, current: f32) {
+        let error = goal - current;
+
+        self.p.update(error);
+        self.i.update(error);
+        self.d.update(error);
+    }
+
+    pub fn output(&self) -> f32 {
+        self.p.output() + self.i.output() + self.d.output()
+    }
 }
 
-loop {
-    p.update(goal, current)
-    i.update(goal, current)
-    d.update(goal, current)
-
-    best_guess = pid()
-
-    sleep(1s)
-}
 ```
 
-If you'll forgive me some pseudocode sins I think that's a pretty succinct representation of a PID controller. 
 The liberty I'm taking here is in calling at a fixed interval and simply integrating and deriving one step at a time, which dramatically simplifies each formula.
