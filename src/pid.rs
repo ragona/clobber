@@ -1,4 +1,4 @@
-use log::trace;
+use log::debug;
 
 #[derive(Debug)]
 enum ControllerType {
@@ -23,13 +23,13 @@ impl Controller {
     }
 
     pub fn update(&mut self, error: f32) {
-        trace!("{:#?}, {}, {}", self.controller_type, self.error, error);
-
         self.error = match self.controller_type {
             ControllerType::Proportional => error,
             ControllerType::Integral => (error + self.error) / 2.0,
             ControllerType::Derivative => error - self.error,
-        }
+        };
+
+        debug!("{:#?}, {}", self.controller_type, self.error);
     }
 
     pub fn output(&self) -> f32 {
@@ -62,7 +62,7 @@ impl PidController {
         self.i.update(error);
         self.d.update(error);
 
-        trace!("PidController, {}", self.output());
+        debug!("PidController, {}", self.output());
     }
 
     pub fn output(&self) -> f32 {

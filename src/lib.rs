@@ -1,7 +1,9 @@
 mod pid;
 
-pub use pid::PidController;
+#[cfg(feature = "tuning")]
+pub mod tuning;
 
+pub use pid::PidController;
 #[cfg(test)]
 mod tests {
     #[test]
