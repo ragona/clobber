@@ -5,7 +5,7 @@ authors = ["Ryan Ragona <ryanragona@gmail.com>"]
 edition = "2018"
 
 [features]
-tuning = ["fern", "chrono"]
+tuning = ["fern", "chrono", "tempfile"]
 
 [dependencies]
 log = "0.4.8"
@@ -13,3 +13,4 @@ log = "0.4.8"
 # Used for easy log output with the `tuning` flag
 fern = {version = "0.6.0", optional = true}
 chrono = {version = "0.4.11", optional = true}
+tempfile = {version = "3.1.0", optional = true}
