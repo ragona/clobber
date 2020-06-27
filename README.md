@@ -1,3 +1,5 @@
+> :warning: **Project in early development!** This is not a stable library. 
+
 # `clobber`
 
 `clobber` is a library about dynamically tuning concurrent workloads. 
