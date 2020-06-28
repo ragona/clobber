@@ -53,6 +53,11 @@ pub fn graph_log(log_path: &Path) -> Result<()> {
     let write_sublog = |lines: Vec<String>, path: &Path| -> Result<()> {
         let mut log_file = create_or_overwrite_file(path)?;
         for line in lines {
+            // split into fields and drop the middle 'type' field (e.g. "Proportional")
+            let fields = line.split(",").collect::<Vec<&str>>();
+            let mut line = [fields[0], fields[2]].join(",");
+
+            // Write reduced log to sublog file
             writeln!(&mut log_file, "{}", line)?;
         }
 
@@ -81,7 +86,7 @@ pub fn setup_logger(log_level: LevelFilter, path: &Path) -> Result<()> {
         .format(|out, message, _| {
             out.finish(format_args!(
                 "{} {}",
-                chrono::Local::now().format("[%H:%M:%S],"),
+                chrono::Local::now().format("%H:%M:%S,"),
                 message
             ))
         })
@@ -94,6 +99,9 @@ pub fn setup_logger(log_level: LevelFilter, path: &Path) -> Result<()> {
 }
 
 fn create_or_overwrite_file(path: &Path) -> Result<File> {
+    // attempt to delete
+    std::fs::remove_file(path).ok();
+
     Ok(std::fs::OpenOptions::new()
         .write(true)
         .create(true)

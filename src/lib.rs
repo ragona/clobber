@@ -1,4 +1,5 @@
 mod pid;
+mod pool;
 
 #[cfg(feature = "tuning")]
 pub mod tuning;
