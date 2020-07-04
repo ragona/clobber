@@ -9,7 +9,7 @@ tuning = ["fern", "chrono", "tempfile"]
 
 [dependencies]
 log = "0.4.8"
-crossbeam-channel = "0.4.2"
+async-std = "1.6.2"
 
 # Used for log output with the `tuning` flag
 fern = {version = "0.6.0", optional = true}
@@ -18,5 +18,4 @@ tempfile = {version = "3.1.0", optional = true}
 
 [dev-dependencies]
 surf = "2.0.0-alpha.4"
-async-std = "1.6.2"
 futures-await-test = "0.3.0"
