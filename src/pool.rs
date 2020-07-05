@@ -1,10 +1,8 @@
 #![allow(dead_code)]
 
 use async_std::{
-    pin::Pin,
     prelude::*,
     sync::{channel, Receiver, Sender},
-    task::{Context, Poll},
 };
 use std::collections::VecDeque;
 
@@ -90,26 +88,37 @@ where
     }
 
     /// Pops tasks from the queue if we have available worker capacity
-    fn supervise(&mut self) {
+    /// Sends out messages if any of our workers have delivered results
+    ///
+    /// todo: Bootleg stream/fut impl. Make it real.
+    ///
+    pub async fn next(&mut self) -> Option<()> {
         if self.queue.is_empty() {
-            return;
+            return None;
         }
 
         if self.at_worker_capacity() {
-            return;
+            return Some(());
+        }
+
+        match self.worker_recv.try_recv() {
+            Ok(out) => {
+                self.cur_workers -= 1;
+                self.results.send(out).await;
+            }
+            Err(_) => {}
         }
 
         while !self.queue.is_empty() && !self.at_worker_capacity() {
-            let task = self.queue.pop_front().unwrap(); // safe; we just checked empty
-            self.add_worker(task);
             self.cur_workers += 1;
-        }
-    }
 
-    /// Starts another worker process
-    fn add_worker(&mut self, task: In) {
-        let send = self.worker_send.clone();
-        async_std::task::spawn((self.task)(task, send));
+            let task = self.queue.pop_front().unwrap(); // safe; we just checked empty
+            let send = self.worker_send.clone();
+
+            async_std::task::spawn((self.task)(task, send));
+        }
+
+        return Some(());
     }
 }
 
@@ -133,6 +142,8 @@ mod tests {
         pool.push(3);
         pool.push(4);
 
-        dbg!(recv.recv().await);
+        while let Some(_) = pool.next().await {
+            dbg!(recv.recv().await);
+        }
     }
 }
