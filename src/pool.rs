@@ -21,6 +21,8 @@ struct WorkerPool<In, Out, F> {
     worker_send: Sender<Out>,
     /// The async function that a worker performs
     task: fn(In, Sender<Out>) -> F,
+    /// Where this pool sends results
+    results: Sender<Out>,
 }
 
 /// # WorkerPool
@@ -44,11 +46,11 @@ struct WorkerPool<In, Out, F> {
 ///
 impl<In, Out, F> WorkerPool<In, Out, F>
 where
-    In: Send + Sync + Unpin + 'static,
-    Out: Send + Sync + Unpin + 'static,
-    F: Future<Output = ()> + Send + Unpin + 'static,
+    In: Send + Sync + 'static,
+    Out: Send + Sync + 'static,
+    F: Future<Output = ()> + Send + 'static,
 {
-    pub fn new(task: fn(In, Sender<Out>) -> F, num_workers: usize) -> Self {
+    pub fn new(task: fn(In, Sender<Out>) -> F, num_workers: usize, results: Sender<Out>) -> Self {
         let (worker_send, worker_recv) = channel(num_workers); // todo: I'm concerned about the size here
         Self {
             queue: VecDeque::with_capacity(num_workers),
@@ -57,6 +59,7 @@ where
             task,
             worker_recv,
             worker_send,
+            results,
         }
     }
 
@@ -110,28 +113,6 @@ where
     }
 }
 
-impl<In, Out, F> Stream for WorkerPool<In, Out, F>
-where
-    In: Send + Sync + Unpin + 'static,
-    Out: Send + Sync + Unpin + 'static,
-    F: Future<Output = ()> + Send + Unpin + 'static,
-{
-    type Item = Out;
-
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut wp = self.get_mut();
-
-        match wp.worker_recv.try_recv() {
-            Ok(out) => {
-                wp.cur_workers -= 1;
-                wp.supervise();
-                return Poll::Ready(Some(out));
-            }
-            Err(_) => Poll::Pending,
-        }
-    }
-}
-
 async fn double_twice(x: usize, send: Sender<usize>) {
     send.send(x * 2).await;
     send.send(x * 2 * 2).await;
@@ -144,15 +125,14 @@ mod tests {
 
     #[async_test]
     async fn pool_test() {
-        let mut pool = WorkerPool::new(double_twice, 4);
+        let (send, recv) = channel(100);
+        let mut pool = WorkerPool::new(double_twice, 4, send);
 
         pool.push(1usize);
         pool.push(2);
         pool.push(3);
         pool.push(4);
 
-        while let Some(result) = pool.next().await {
-            dbg!(result);
-        }
+        dbg!(recv.recv().await);
     }
 }
