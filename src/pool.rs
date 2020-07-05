@@ -93,14 +93,7 @@ where
     /// todo: Bootleg stream/fut impl. Make it real.
     ///
     pub async fn next(&mut self) -> Option<()> {
-        if self.queue.is_empty() {
-            return None;
-        }
-
-        if self.at_worker_capacity() {
-            return Some(());
-        }
-
+        // get waiting results and send to consumer
         match self.worker_recv.try_recv() {
             Ok(out) => {
                 self.cur_workers -= 1;
@@ -109,6 +102,7 @@ where
             Err(_) => {}
         }
 
+        // add new workers
         while !self.queue.is_empty() && !self.at_worker_capacity() {
             self.cur_workers += 1;
 
@@ -118,7 +112,7 @@ where
             async_std::task::spawn((self.task)(task, send));
         }
 
-        return Some(());
+        Some(())
     }
 }
 
@@ -130,6 +124,7 @@ async fn double_twice(x: usize, send: Sender<usize>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_std::sync::TryRecvError;
     use futures_await_test::async_test;
 
     #[async_test]
@@ -143,7 +138,12 @@ mod tests {
         pool.push(4);
 
         while let Some(_) = pool.next().await {
-            dbg!(recv.recv().await);
+            match recv.try_recv() {
+                Ok(out) => {
+                    dbg!(out);
+                }
+                Err(_) => {}
+            }
         }
     }
 }
