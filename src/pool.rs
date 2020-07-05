@@ -13,14 +13,23 @@ struct WorkerPool<In, Out, F> {
     cur_workers: usize,
     /// Outstanding tasks
     queue: VecDeque<In>,
-    /// Where we get results from workers
-    worker_recv: Receiver<Out>,
-    /// Where workers send results
-    worker_send: Sender<Out>,
-    /// The async function that a worker performs
-    task: fn(In, Sender<Out>) -> F,
     /// Where this pool sends results
     results: Sender<Out>,
+    /// Where workers send results
+    worker_send: Sender<Out>,
+    /// Where we get results from workers
+    worker_recv: Receiver<Out>,
+    /// The async function that a worker performs
+    task: fn(In, Sender<Out>) -> F,
+
+    /// Internal event bus
+    event_send: Sender<WorkerEvent>,
+    event_recv: Receiver<WorkerEvent>,
+}
+
+#[derive(Debug, Copy, Clone)]
+enum WorkerEvent {
+    Done,
 }
 
 /// # WorkerPool
@@ -50,6 +59,8 @@ where
 {
     pub fn new(task: fn(In, Sender<Out>) -> F, num_workers: usize, results: Sender<Out>) -> Self {
         let (worker_send, worker_recv) = channel(num_workers); // todo: I'm concerned about the size here
+        let (event_send, event_recv) = channel(1024);
+
         Self {
             queue: VecDeque::with_capacity(num_workers),
             cur_workers: 0,
@@ -58,6 +69,8 @@ where
             worker_recv,
             worker_send,
             results,
+            event_recv,
+            event_send,
         }
     }
 
@@ -84,7 +97,11 @@ where
 
     /// Whether the current number of workers is the target number of workers
     pub fn at_worker_capacity(&self) -> bool {
-        self.cur_workers() == self.num_workers
+        self.cur_workers == self.num_workers
+    }
+
+    pub fn working(&self) -> bool {
+        self.cur_workers > 0
     }
 
     /// Pops tasks from the queue if we have available worker capacity
@@ -92,14 +109,19 @@ where
     ///
     /// todo: Bootleg stream/fut impl. Make it real.
     ///
-    pub async fn next(&mut self) -> Option<()> {
-        // get waiting results and send to consumer
-        match self.worker_recv.try_recv() {
-            Ok(out) => {
-                self.cur_workers -= 1;
-                self.results.send(out).await;
+    pub async fn work(&mut self) -> bool {
+        // update state from our event bus
+        while let Ok(event) = self.event_recv.try_recv() {
+            match event {
+                WorkerEvent::Done => {
+                    self.cur_workers -= 1;
+                }
             }
-            Err(_) => {}
+        }
+
+        // get waiting results and send to consumer
+        if let Ok(out) = self.worker_recv.try_recv() {
+            self.results.send(out).await;
         }
 
         // add new workers
@@ -107,12 +129,17 @@ where
             self.cur_workers += 1;
 
             let task = self.queue.pop_front().unwrap(); // safe; we just checked empty
-            let send = self.worker_send.clone();
+            let work_send = self.worker_send.clone();
+            let event_send = self.event_send.clone();
+            let fut = (self.task)(task, work_send);
 
-            async_std::task::spawn((self.task)(task, send));
+            async_std::task::spawn(async move {
+                fut.await;
+                event_send.send(WorkerEvent::Done).await;
+            });
         }
 
-        Some(())
+        self.working()
     }
 }
 
@@ -137,7 +164,7 @@ mod tests {
         pool.push(3);
         pool.push(4);
 
-        while let Some(_) = pool.next().await {
+        while pool.work().await {
             match recv.try_recv() {
                 Ok(out) => {
                     dbg!(out);
