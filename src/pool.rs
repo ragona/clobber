@@ -1,8 +1,10 @@
 #![allow(dead_code)]
 
 use async_std::{
+    pin::Pin,
     prelude::*,
     sync::{channel, Receiver, Sender},
+    task::{Context, Poll},
 };
 use std::collections::VecDeque;
 
@@ -13,8 +15,6 @@ struct WorkerPool<In, Out, F> {
     cur_workers: usize,
     /// Outstanding tasks
     queue: VecDeque<In>,
-    /// Where this pool sends results
-    results: Sender<Out>,
     /// Where workers send results
     worker_send: Sender<Out>,
     /// Where we get results from workers
@@ -57,7 +57,7 @@ where
     Out: Send + Sync + 'static,
     F: Future<Output = ()> + Send + 'static,
 {
-    pub fn new(task: fn(In, Sender<Out>) -> F, num_workers: usize, results: Sender<Out>) -> Self {
+    pub fn new(task: fn(In, Sender<Out>) -> F, num_workers: usize) -> Self {
         let (worker_send, worker_recv) = channel(num_workers); // todo: I'm concerned about the size here
         let (event_send, event_recv) = channel(1024);
 
@@ -65,12 +65,11 @@ where
             queue: VecDeque::with_capacity(num_workers),
             cur_workers: 0,
             num_workers,
-            task,
             worker_recv,
             worker_send,
-            results,
             event_recv,
             event_send,
+            task,
         }
     }
 
@@ -109,7 +108,7 @@ where
     ///
     /// todo: Bootleg stream/fut impl. Make it real.
     ///
-    pub async fn work(&mut self) -> bool {
+    pub async fn next(&mut self) -> Poll<Option<Out>> {
         // update state from our event bus
         while let Ok(event) = self.event_recv.try_recv() {
             match event {
@@ -121,7 +120,7 @@ where
 
         // get waiting results and send to consumer
         if let Ok(out) = self.worker_recv.try_recv() {
-            self.results.send(out).await;
+            return Poll::Ready(Some(out));
         }
 
         // add new workers
@@ -139,37 +138,43 @@ where
             });
         }
 
-        self.working()
+        match self.working() {
+            true => Poll::Pending,
+            false => Poll::Ready(None),
+        }
     }
 }
 
 async fn double_twice(x: usize, send: Sender<usize>) {
     send.send(x * 2).await;
-    send.send(x * 2 * 2).await;
+    send.send((x * 2) * 2).await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_std::sync::TryRecvError;
     use futures_await_test::async_test;
 
     #[async_test]
     async fn pool_test() {
-        let (send, recv) = channel(100);
-        let mut pool = WorkerPool::new(double_twice, 4, send);
+        let mut pool = WorkerPool::new(double_twice, 4);
 
         pool.push(1usize);
         pool.push(2);
         pool.push(3);
         pool.push(4);
 
-        while pool.work().await {
-            match recv.try_recv() {
-                Ok(out) => {
-                    dbg!(out);
-                }
-                Err(_) => {}
+        loop {
+            match pool.next().await {
+                Poll::Ready(out) => match out {
+                    None => {
+                        break;
+                    }
+                    Some(out) => {
+                        dbg!(out);
+                    }
+                },
+                _ => {}
             }
         }
     }
