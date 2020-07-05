@@ -16,11 +16,13 @@
 use chrono;
 use fern;
 use log::LevelFilter;
-use std::error::Error;
-use std::fs;
-use std::fs::File;
-use std::io::{self, Write};
-use std::path::Path;
+use std::{
+    error::Error,
+    fs,
+    fs::File,
+    io::{self, Write},
+    path::Path,
+};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -43,10 +45,7 @@ pub fn graph_log(log_path: &Path) -> Result<()> {
 
     // split out to individual controller files to make gnuplot happier
     let log_filter = |filter_string: &str| {
-        log.lines()
-            .filter(|s| s.contains(filter_string))
-            .map(|s| s.into())
-            .collect::<Vec<String>>()
+        log.lines().filter(|s| s.contains(filter_string)).map(|s| s.into()).collect::<Vec<String>>()
     };
 
     // write out the filtered log files to the sub file
@@ -84,11 +83,7 @@ pub fn setup_logger(log_level: LevelFilter, path: &Path) -> Result<()> {
 
     fern::Dispatch::new()
         .format(|out, message, _| {
-            out.finish(format_args!(
-                "{} {}",
-                chrono::Local::now().format("%H:%M:%S,"),
-                message
-            ))
+            out.finish(format_args!("{} {}", chrono::Local::now().format("%H:%M:%S,"), message))
         })
         .chain(std::io::stdout())
         .chain(log_file)
@@ -102,8 +97,5 @@ fn create_or_overwrite_file(path: &Path) -> Result<File> {
     // attempt to delete
     std::fs::remove_file(path).ok();
 
-    Ok(std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(path)?)
+    Ok(std::fs::OpenOptions::new().write(true).create(true).open(path)?)
 }

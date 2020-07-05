@@ -15,11 +15,7 @@ struct Controller {
 
 impl Controller {
     pub fn new(controller_type: ControllerType, gain: f32) -> Self {
-        Self {
-            controller_type,
-            gain,
-            error: 0.0,
-        }
+        Self { controller_type, gain, error: 0.0 }
     }
 
     pub fn update(&mut self, error: f32) {

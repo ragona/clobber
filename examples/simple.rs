@@ -1,10 +1,10 @@
 use async_std::task;
-use clobber::tuning::{graph_log, setup_logger};
-use clobber::PidController;
+use clobber::{
+    tuning::{graph_log, setup_logger},
+    PidController,
+};
 use log::LevelFilter;
-use std::error::Error;
-use std::path::Path;
-use std::time::Duration;
+use std::{error::Error, path::Path, time::Duration};
 use surf;
 
 const LOG_PATH: &str = "examples/.logs/simple.log";
