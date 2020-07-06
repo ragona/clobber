@@ -105,9 +105,6 @@ where
 
     /// Pops tasks from the queue if we have available worker capacity
     /// Sends out messages if any of our workers have delivered results
-    ///
-    /// todo: Bootleg stream/fut impl. Make it real.
-    ///
     async fn work(&mut self) -> Poll<Option<Out>> {
         // update state from our event bus
         while let Ok(event) = self.event_recv.try_recv() {
