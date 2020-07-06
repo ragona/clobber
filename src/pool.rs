@@ -156,7 +156,7 @@ where
 
             loop {
                 match pool.work().await {
-                    Poll::Ready(x) => return Poll::Ready(x),
+                    Poll::Ready(out) => return Poll::Ready(out),
                     _ => {}
                 }
             }

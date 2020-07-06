@@ -21,5 +21,7 @@ features = ["unstable"]
 
 [dev-dependencies]
 surf = "2.0.0-alpha.4"
+warp = "0.2.3"
 http-types = "2.2.1"
 futures-await-test = "0.3.0"
+tokio = "0.2.21"
