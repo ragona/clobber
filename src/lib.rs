@@ -5,8 +5,10 @@ mod pool;
 pub mod tuning;
 
 pub use pid::PidController;
+pub use pool::WorkerPool;
+
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_pid() {}
+    fn stub_test() {}
 }

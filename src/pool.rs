@@ -8,7 +8,26 @@ use async_std::{
 };
 use std::collections::VecDeque;
 
-struct WorkerPool<In, Out, F> {
+/// # WorkerPool
+///
+/// This is a bit of an odd implementation of a futures-oriented worker pool.
+/// It's intended to be used with relatively long-running futures that all write out to the
+/// same output channel of type `Out`.
+///
+/// The number of workers in this implementation is intended as a best effort, not a fixed
+/// count, with an eye towards being used in situations where we may want that number to go
+/// up or down over time based on the environment conditions.
+///
+/// You could imagine that a system under load might decide to back off on the number of open
+/// connections if it was experiencing resource contention, and conversely to add new workers
+/// if the queue has grown and we aren't at our max worker count.
+///
+/// I'm not incredibly concerned about allocations in this model; `WorkerPool` is a higher level
+/// abstraction than something like `crossbeam`. I built this for a client-side use case to
+/// put a load test target under variable load from long-running workers that just sit and loop
+/// TCP connections against a server.
+///
+pub struct WorkerPool<In, Out, F> {
     /// How many workers we want
     num_workers: usize,
     /// How many workers we have
@@ -32,25 +51,6 @@ enum WorkerEvent {
     Done,
 }
 
-/// # WorkerPool
-///
-/// This is a bit of an odd implementation of a futures-oriented worker pool.
-/// It's intended to be used with relatively long-running futures that all write out to the
-/// same output channel of type `Out`.
-///
-/// The number of workers in this implementation is intended as a best effort, not a fixed
-/// count, with an eye towards being used in situations where we may want that number to go
-/// up or down over time based on the environment conditions.
-///
-/// You could imagine that a system under load might decide to back off on the number of open
-/// connections if it was experiencing resource contention, and conversely to add new workers
-/// if the queue has grown and we aren't at our max worker count.
-///
-/// I'm not incredibly concerned about allocations in this model; `WorkerPool` is a higher level
-/// abstraction than something like `crossbeam`. I built this for a client-side use case to
-/// put a load test target under variable load from long-running workers that just sit and loop
-/// TCP connections against a server.
-///
 impl<In, Out, F> WorkerPool<In, Out, F>
 where
     In: Send + Sync + Unpin + 'static,
@@ -58,7 +58,7 @@ where
     F: Future<Output = ()> + Send + 'static,
 {
     pub fn new(task: fn(In, Sender<Out>) -> F, num_workers: usize) -> Self {
-        let (worker_send, worker_recv) = channel(num_workers); // todo: I'm concerned about the size here
+        let (worker_send, worker_recv) = channel(num_workers);
         let (event_send, event_recv) = channel(1024);
 
         Self {
@@ -184,6 +184,7 @@ mod tests {
         pool.push(4);
 
         while let Some(i) = pool.next().await {
+            pool.num_workers = 4;
             dbg!(i);
         }
     }
