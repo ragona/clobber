@@ -53,7 +53,7 @@ enum WorkerEvent {
 ///
 impl<In, Out, F> WorkerPool<In, Out, F>
 where
-    In: Send + Sync + 'static,
+    In: Send + Sync + Unpin + 'static,
     Out: Send + Sync + 'static,
     F: Future<Output = ()> + Send + 'static,
 {
@@ -108,7 +108,7 @@ where
     ///
     /// todo: Bootleg stream/fut impl. Make it real.
     ///
-    pub async fn next(&mut self) -> Poll<Option<Out>> {
+    pub async fn work(&mut self) -> Poll<Option<Out>> {
         // update state from our event bus
         while let Ok(event) = self.event_recv.try_recv() {
             match event {
@@ -145,15 +145,37 @@ where
     }
 }
 
-async fn double_twice(x: usize, send: Sender<usize>) {
-    send.send(x * 2).await;
-    send.send((x * 2) * 2).await;
+impl<In, Out, F> Stream for WorkerPool<In, Out, F>
+where
+    In: Send + Sync + Unpin + 'static,
+    Out: Send + Sync + 'static,
+    F: Future<Output = ()> + Send + 'static,
+{
+    type Item = Out;
+
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        async_std::task::block_on(async {
+            let pool = self.get_mut();
+
+            loop {
+                match pool.work().await {
+                    Poll::Ready(x) => return Poll::Ready(x),
+                    _ => {}
+                }
+            }
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures_await_test::async_test;
+
+    async fn double_twice(x: usize, send: Sender<usize>) {
+        send.send(x * 2).await;
+        send.send((x * 2) * 2).await;
+    }
 
     #[async_test]
     async fn pool_test() {
@@ -164,18 +186,8 @@ mod tests {
         pool.push(3);
         pool.push(4);
 
-        loop {
-            match pool.next().await {
-                Poll::Ready(out) => match out {
-                    None => {
-                        break;
-                    }
-                    Some(out) => {
-                        dbg!(out);
-                    }
-                },
-                _ => {}
-            }
+        while let Some(i) = pool.next().await {
+            dbg!(i);
         }
     }
 }
