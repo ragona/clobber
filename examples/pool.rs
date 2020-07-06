@@ -1,7 +1,7 @@
 //! # Async WorkerPool example
 //!
 //! This is a mildly contrived example in which I have long running jobs that hit localhost
-//! 100x in a loop and push out a tuple with status code and how long the request took.
+//! 1000x in a loop and push out a tuple with status code and how long the request took.
 //!
 //!
 
@@ -18,31 +18,31 @@ type Res = (StatusCode, Duration);
 fn main() {
     start_test_server();
 
-    // one worker for benchmarking
+    // 1 worker
     run_batches(1, 1000, 1);
     run_batches(4, 1000, 1);
     run_batches(8, 1000, 1);
 
     println!();
 
-    // one worker per job
+    // 1 worker / 1 job
     run_batches(1, 1000, 1);
     run_batches(4, 1000, 4);
     run_batches(8, 1000, 8);
 
     println!();
 
-    // 2x more workers than jobs
-    run_batches(1, 1000, 2);
-    run_batches(4, 1000, 8);
-    run_batches(8, 1000, 16);
+    // 1 worker / 2 job
+    run_batches(1, 1000, 1);
+    run_batches(8, 1000, 4);
+    run_batches(16, 1000, 8);
 
     println!();
 
-    // 4x more workers than jobs
-    run_batches(1, 1000, 4);
-    run_batches(4, 1000, 16);
-    run_batches(8, 1000, 32);
+    // 1 worker / 4 job
+    run_batches(4, 1000, 1);
+    run_batches(16, 1000, 4);
+    run_batches(36, 1000, 8);
 }
 
 fn run_batches(num_batches: usize, batch_size: usize, num_workers: usize) {
@@ -64,8 +64,11 @@ fn run_batches(num_batches: usize, batch_size: usize, num_workers: usize) {
         let run_duration = Instant::now().duration_since(start_time).as_secs_f32();
 
         println!(
-            "Completed {} requests in {:.2}s with {} workers",
-            success_count, run_duration, num_workers
+            "{}, {:.2}, {}, {}",
+            success_count,
+            run_duration,
+            num_workers,
+            success_count as f32 / run_duration,
         )
     })
 }
