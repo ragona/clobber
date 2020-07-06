@@ -108,7 +108,7 @@ where
     ///
     /// todo: Bootleg stream/fut impl. Make it real.
     ///
-    pub async fn work(&mut self) -> Poll<Option<Out>> {
+    async fn work(&mut self) -> Poll<Option<Out>> {
         // update state from our event bus
         while let Ok(event) = self.event_recv.try_recv() {
             match event {
