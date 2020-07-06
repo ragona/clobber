@@ -16,28 +16,63 @@ use warp::Filter;
 type Res = (StatusCode, Duration);
 
 fn main() {
+    start_test_server();
+
+    // one worker for benchmarking
+    run_batches(1, 1000, 1);
+    run_batches(4, 1000, 1);
+    run_batches(8, 1000, 1);
+
+    println!();
+
+    // one worker per job
+    run_batches(1, 1000, 1);
+    run_batches(4, 1000, 4);
+    run_batches(8, 1000, 8);
+
+    println!();
+
+    // 2x more workers than jobs
+    run_batches(1, 1000, 2);
+    run_batches(4, 1000, 8);
+    run_batches(8, 1000, 16);
+
+    println!();
+
+    // 4x more workers than jobs
+    run_batches(1, 1000, 4);
+    run_batches(4, 1000, 16);
+    run_batches(8, 1000, 32);
+}
+
+fn run_batches(num_batches: usize, batch_size: usize, num_workers: usize) {
     task::block_on(async {
-        let num_workers = 1;
-        let num_jobs = 4;
-        let mut pool = WorkerPool::new(load_a_hundred_times, num_workers);
+        let mut pool = WorkerPool::new(load_url_n_times, num_workers);
 
-        start_test_server().await;
-
-        for _ in 0..num_jobs {
-            pool.push("http://localhost:8000/");
+        for _ in 0..num_batches {
+            pool.push(("http://127.0.0.1:8000/hello/server", batch_size));
         }
 
-        let mut count = 0;
-        while let Some(res) = pool.next().await {
-            count += 1;
+        let start_time = Instant::now();
+        let mut success_count = 0;
+        while let Some((status, _)) = pool.next().await {
+            if status == http_types::StatusCode::Ok {
+                success_count += 1;
+            }
         }
 
-        dbg!(count);
+        let run_duration = Instant::now().duration_since(start_time).as_secs_f32();
+
+        println!(
+            "Completed {} requests in {:.2}s with {} workers",
+            success_count, run_duration, num_workers
+        )
     })
 }
 
-async fn load_a_hundred_times(url: &str, send: Sender<Res>) {
-    for _ in 0..100 {
+async fn load_url_n_times(config: (&str, usize), send: Sender<Res>) {
+    let (url, n) = config;
+    for _ in 0..n {
         let start = Instant::now();
         let status = match surf::get(url).await {
             Ok(res) => res.status(),
@@ -52,7 +87,7 @@ async fn load_a_hundred_times(url: &str, send: Sender<Res>) {
 /// Spins off an OS thread for tokio/warp to start our test server.
 /// It's a weird hack, but I didn't want to find out what happens if you put tokio inside
 /// the async-std runtime, and this is a test. Don't do this in prod.
-async fn start_test_server() {
+fn start_test_server() {
     std::thread::spawn(|| {
         let mut tokio_rt = Runtime::new().expect("Failed to start tokio runtime for test server");
         tokio_rt.block_on(async {
