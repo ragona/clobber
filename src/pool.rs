@@ -39,18 +39,12 @@ pub struct WorkerPool<In, Out, F> {
     output: Sender<Out>,
     /// The async function that a worker performs
     task: fn(Job<In, Out>) -> F,
-    /// Cloneable return channel sender, given to workers
-    worker_send: Sender<Out>,
-    /// The channel receiver we check for work from the workers
-    worker_recv: Receiver<Out>,
-    /// The channel sender we use to stop workers
-    close_send: Sender<()>,
-    /// Cloneable close channel receiver, given to workers
-    close_recv: Receiver<()>,
-
+    /// Used to get completed work from workers
+    results_channel: (Sender<Out>, Receiver<Out>),
+    /// Used to stop workers before they self-terminate
+    close_channel: (Sender<()>, Receiver<()>),
     /// Unbounded internal event and command bus, processed every tick.
-    event_send: CrossbeamSender<WorkerPoolEvent>,
-    event_recv: CrossbeamReceiver<WorkerPoolEvent>,
+    events_channel: (CrossbeamSender<WorkerPoolEvent>, CrossbeamReceiver<WorkerPoolEvent>),
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -85,22 +79,15 @@ where
     F: Future<Output = ()> + Send + 'static,
 {
     pub fn new(task: fn(Job<In, Out>) -> F, output: Sender<Out>, num_workers: usize) -> Self {
-        let (worker_send, worker_recv) = channel(num_workers);
-        let (close_send, close_recv) = channel(num_workers);
-        let (event_send, event_recv) = crossbeam_channel::unbounded();
-
         Self {
-            queue: VecDeque::with_capacity(num_workers),
-            cur_workers: 0,
-            num_workers,
-            worker_send,
-            worker_recv,
-            close_send,
-            event_recv,
-            event_send,
-            close_recv,
-            output,
             task,
+            output,
+            num_workers,
+            cur_workers: 0,
+            results_channel: channel(num_workers),
+            close_channel: channel(num_workers),
+            events_channel: crossbeam_channel::unbounded(),
+            queue: VecDeque::with_capacity(num_workers),
         }
     }
 
@@ -141,7 +128,7 @@ where
     /// Attempts to grab any immediately available results from the workers
     /// todo: Eh, I'm not sure this is a good API.
     pub fn try_next(&mut self) -> Option<Out> {
-        match self.worker_recv.try_recv() {
+        match self.results_channel.1.try_recv() {
             Ok(out) => Some(out),
             Err(_) => None,
         }
@@ -170,7 +157,7 @@ where
 
     /// Returns whether or not to continue execution.
     fn event_loop(&mut self) -> bool {
-        while let Ok(event) = self.event_recv.try_recv() {
+        while let Ok(event) = self.events_channel.1.try_recv() {
             match event {
                 WorkerPoolEvent::WorkerDone => {
                     // This means a worker actually stopped; either on its own or from a stop cmd.
@@ -194,7 +181,7 @@ where
     /// This ends up only updating the async state machine that number of times, which
     /// is the "lazy" property of async we wanted to achieve.
     async fn flush_output(&mut self) {
-        while let Ok(out) = self.worker_recv.try_recv() {
+        while let Ok(out) = self.results_channel.1.try_recv() {
             self.output.send(out).await;
         }
     }
@@ -206,9 +193,9 @@ where
         }
 
         let task = self.queue.pop_front().unwrap();
-        let work_send = self.worker_send.clone();
-        let event_send = self.event_send.clone();
-        let close_recv = self.close_recv.clone();
+        let work_send = self.results_channel.0.clone();
+        let close_recv = self.close_channel.1.clone();
+        let event_send = self.events_channel.0.clone();
         let job = Job::new(task, close_recv, work_send);
         let fut = (self.task)(job);
 
@@ -226,7 +213,7 @@ where
     /// Find a listening worker and tell it to stop.
     /// Doesn't forcibly kill in-progress tasks.
     async fn send_stop_work_message(&mut self) {
-        self.close_send.send(()).await;
+        self.close_channel.0.send(()).await;
     }
 
     /// Pops tasks from the queue if we have available worker capacity
@@ -288,7 +275,5 @@ mod tests {
         });
 
         pool.start().await;
-
-        // todo make it ever stop
     }
 }
