@@ -54,7 +54,7 @@ pub fn graph_log(log_path: &Path) -> Result<()> {
         for line in lines {
             // split into fields and drop the middle 'type' field (e.g. "Proportional")
             let fields = line.split(",").collect::<Vec<&str>>();
-            let mut line = [fields[0], fields[2]].join(",");
+            let line = [fields[0], fields[2]].join(",");
 
             // Write reduced log to sublog file
             writeln!(&mut log_file, "{}", line)?;

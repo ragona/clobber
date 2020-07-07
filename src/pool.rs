@@ -3,7 +3,7 @@
 use async_std::{
     pin::Pin,
     prelude::*,
-    sync::{channel, Receiver, Sender},
+    sync::{channel, Receiver, Sender, TryRecvError},
     task::{Context, Poll},
 };
 use std::collections::VecDeque;
@@ -101,6 +101,13 @@ where
 
     pub fn working(&self) -> bool {
         self.cur_workers > 0
+    }
+
+    pub fn try_next(&mut self) -> Option<Out> {
+        match self.worker_recv.try_recv() {
+            Ok(out) => Some(out),
+            Err(_) => None,
+        }
     }
 
     /// Pops tasks from the queue if we have available worker capacity
