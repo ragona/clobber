@@ -29,9 +29,9 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 /// use clobber::tuning::{setup_logger, graph_log};
 /// use log::LevelFilter;
 ///
-/// setup_logger(LevelFilter::Debug, "simple.log").unwrap();
+/// setup_logger(LevelFilter::Debug, "simple.log".into()).unwrap();
 /// // ... do stuff!
-/// graph_log("simple.log").expect("Failed to graph");
+/// graph_log("simple.log".into()).expect("Failed to graph");
 /// ```
 pub fn graph_log(log_path: &Path) -> Result<()> {
     // load in the log of all events

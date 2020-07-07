@@ -1,6 +1,6 @@
 //! # PID Controller WorkerPool
 //!
-//! Attempting to drive throughput with
+//! Attempting to drive target HTTP request throughput via PID controller.
 //!
 
 use async_std::{

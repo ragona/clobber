@@ -24,36 +24,44 @@ use std::collections::VecDeque;
 /// if the queue has grown and we aren't at our max worker count.
 ///
 /// I'm not incredibly concerned about allocations in this model; `WorkerPool` is a higher level
-/// abstraction than something like `crossbeam`. I built this for a client-side use case to
+/// abstraction than something like `crossbeam`. I built this for a client-side CLI use case to
 /// put a load test target under variable load from long-running workers that just sit and loop
 /// TCP connections against a server.
 ///
 pub struct WorkerPool<In, Out, F> {
     /// How many workers we want
     num_workers: usize,
-    /// How many workers we have
+    /// How many workers we actually have
     cur_workers: usize,
     /// Outstanding tasks
     queue: VecDeque<In>,
     /// Output channel
     output: Sender<Out>,
-    /// In progress jobs represented as oneshot closers
-    closers: VecDeque<Sender<()>>,
     /// The async function that a worker performs
     task: fn(Job<In, Out>) -> F,
-    /// Cloneable return channel, given to workers
+    /// Cloneable return channel sender, given to workers
     worker_send: Sender<Out>,
-    /// The channel we check for work from the workers
+    /// The channel receiver we check for work from the workers
     worker_recv: Receiver<Out>,
+    /// The channel sender we use to stop workers
+    close_send: Sender<()>,
+    /// Cloneable close channel receiver, given to workers
+    close_recv: Receiver<()>,
 
-    /// Internal event bus
-    event_send: CrossbeamSender<WorkerEvent>,
-    event_recv: CrossbeamReceiver<WorkerEvent>,
+    /// Unbounded internal event and command bus, processed every tick.
+    event_send: CrossbeamSender<WorkerPoolEvent>,
+    event_recv: CrossbeamReceiver<WorkerPoolEvent>,
 }
 
 #[derive(Debug, Copy, Clone)]
-enum WorkerEvent {
-    Done,
+enum WorkerPoolEvent {
+    WorkerDone,
+    Command(WorkerPoolCommand),
+}
+
+#[derive(Debug, Copy, Clone)]
+enum WorkerPoolCommand {
+    Stop,
 }
 
 // todo command channel
@@ -78,36 +86,29 @@ where
 {
     pub fn new(task: fn(Job<In, Out>) -> F, output: Sender<Out>, num_workers: usize) -> Self {
         let (worker_send, worker_recv) = channel(num_workers);
+        let (close_send, close_recv) = channel(num_workers);
         let (event_send, event_recv) = crossbeam_channel::unbounded();
 
         Self {
             queue: VecDeque::with_capacity(num_workers),
-            closers: VecDeque::with_capacity(num_workers),
             cur_workers: 0,
             num_workers,
-            worker_recv,
             worker_send,
+            worker_recv,
+            close_send,
             event_recv,
             event_send,
+            close_recv,
             output,
             task,
         }
     }
 
-    /// Sets the target number of workers.
-    /// Does not stop in-progress workers.
-    pub fn set_num_workers(&mut self, n: usize) {
-        self.num_workers = n;
-    }
-
-    /// Add a new task to the back of the queue
-    pub fn push(&mut self, task: In) {
-        self.queue.push_back(task);
-    }
-
     /// Number of workers currently working
+    /// This is the number of workers we haven't tried to stop yet plus the workers that haven't
+    /// noticed they were told to stop.
     pub fn cur_workers(&self) -> usize {
-        self.closers.len()
+        self.cur_workers
     }
 
     /// Target number of workers
@@ -116,14 +117,29 @@ where
     }
 
     /// Whether the current number of workers is the target number of workers
+    /// Adjusted for the number of workers that we have TOLD to stop but have
+    /// not actually gotten around to stopping yet.
     pub fn at_target_worker_count(&self) -> bool {
-        self.cur_workers == self.target_workers()
+        self.cur_workers() == self.target_workers()
     }
 
     pub fn working(&self) -> bool {
-        self.cur_workers > 0
+        self.cur_workers() > 0
     }
 
+    /// Sets the target number of workers.
+    /// Does not stop in-progress workers.
+    pub fn set_target_workers(&mut self, n: usize) {
+        self.num_workers = n;
+    }
+
+    /// Add a new task to the back of the queue
+    pub fn push(&mut self, task: In) {
+        self.queue.push_back(task);
+    }
+
+    /// Attempts to grab any immediately available results from the workers
+    /// todo: Eh, I'm not sure this is a good API.
     pub fn try_next(&mut self) -> Option<Out> {
         match self.worker_recv.try_recv() {
             Ok(out) => Some(out),
@@ -134,7 +150,17 @@ where
     pub async fn start(&mut self) {
         task::block_on(async {
             loop {
-                self.work().await;
+                // get waiting results and send to consumer
+                self.flush_output().await;
+
+                // update state from our event bus
+                if !self.event_loop() {
+                    break;
+                }
+
+                // Get us to our target number of workers
+                self.balance_workers().await;
+
                 if !self.working() {
                     break;
                 }
@@ -142,46 +168,78 @@ where
         })
     }
 
-    /// Pops tasks from the queue if we have available worker capacity
-    /// Sends out messages if any of our workers have delivered results
-    async fn work(&mut self) {
-        // update state from our event bus
+    /// Returns whether or not to continue execution.
+    fn event_loop(&mut self) -> bool {
         while let Ok(event) = self.event_recv.try_recv() {
             match event {
-                WorkerEvent::Done => {
+                WorkerPoolEvent::WorkerDone => {
+                    // This means a worker actually stopped; either on its own or from a stop cmd.
                     self.cur_workers -= 1;
                 }
+                WorkerPoolEvent::Command(command) => match command {
+                    WorkerPoolCommand::Stop => {
+                        return false;
+                    }
+                },
             }
         }
 
-        // get waiting results and send to consumer
-        // this blocks on consumption, which gives us a nice property -- if a user only
-        // wants a limited number of messages they can just read a limited number of times.
+        true
+    }
+
+    /// Flush all outstanding work results to the output channel.
+    ///
+    /// This blocks on consumption, which gives us a nice property -- if a user only
+    /// wants a limited number of messages they can just read a limited number of times.
+    /// This ends up only updating the async state machine that number of times, which
+    /// is the "lazy" property of async we wanted to achieve.
+    async fn flush_output(&mut self) {
         while let Ok(out) = self.worker_recv.try_recv() {
             self.output.send(out).await;
         }
+    }
 
+    /// Starts a new worker if there is work to do
+    fn start_worker(&mut self) {
+        if self.queue.is_empty() {
+            return;
+        }
+
+        let task = self.queue.pop_front().unwrap();
+        let work_send = self.worker_send.clone();
+        let event_send = self.event_send.clone();
+        let close_recv = self.close_recv.clone();
+        let job = Job::new(task, close_recv, work_send);
+        let fut = (self.task)(job);
+
+        // If a worker stops on its own without us telling it to stop then we want to know about
+        // it so that we can spin up a replacement. This is done through an unbounded crossbeam
+        // channnel that is processed every tick to update state.
+        async_std::task::spawn(async move {
+            fut.await;
+            event_send.send(WorkerPoolEvent::WorkerDone).expect("failed to send WorkerEvent::Done");
+        });
+
+        self.cur_workers += 1;
+    }
+
+    /// Find a listening worker and tell it to stop.
+    /// Doesn't forcibly kill in-progress tasks.
+    async fn send_stop_work_message(&mut self) {
+        self.close_send.send(()).await;
+    }
+
+    /// Pops tasks from the queue if we have available worker capacity
+    /// Sends out messages if any of our workers have delivered results
+    async fn balance_workers(&mut self) {
         if self.cur_workers() <= self.target_workers() {
             // add workers until we're full
             while !self.queue.is_empty() && !self.at_target_worker_count() {
-                self.cur_workers += 1;
-                let (close_send, close_recv) = channel(1); // oneshot closer
-                self.closers.push_front(close_send);
-                let task = self.queue.pop_front().unwrap(); // safe; we just checked empty
-                let work_send = self.worker_send.clone();
-                let event_send = self.event_send.clone();
-                let job = Job::new(task, close_recv, work_send);
-                let fut = (self.task)(job);
-
-                async_std::task::spawn(async move {
-                    fut.await;
-                    event_send.send(WorkerEvent::Done).expect("failed to send internal event");
-                });
+                self.start_worker();
             }
         } else {
             while !self.at_target_worker_count() {
-                let closer = self.closers.pop_back().unwrap();
-                closer.send(()).await;
+                self.send_stop_work_message().await;
             }
         }
     }
@@ -205,24 +263,23 @@ mod tests {
 
             x *= 2;
 
-            job.results.send(x * 2).await;
+            job.results.send(x).await;
 
-            // easy there buddy
-            task::sleep(Duration::from_millis(100)).await;
+            // pretend this is hard
+            task::sleep(Duration::from_secs(1)).await;
         }
     }
 
     #[async_test]
     async fn pool_test() {
-        let num_workers = 2;
+        let num_workers = 4;
         let (send, recv) = channel(num_workers);
         let mut pool = WorkerPool::new(double, send, num_workers);
 
         pool.push(1);
 
-        dbg!("ASDASDASD");
         task::spawn(async move {
-            for _ in 0..100 {
+            for _ in 0..10 {
                 match recv.recv().await {
                     Ok(out) => {
                         dbg!(out);
