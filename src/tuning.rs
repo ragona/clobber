@@ -16,13 +16,7 @@
 use chrono;
 use fern;
 use log::LevelFilter;
-use std::{
-    error::Error,
-    fs,
-    fs::File,
-    io::{self, Write},
-    path::Path,
-};
+use std::{error::Error, fs, fs::File, io::Write, path::Path};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 

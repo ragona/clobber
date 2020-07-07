@@ -3,7 +3,11 @@
 //! Attempting to drive throughput with
 //!
 
-use async_std::{prelude::*, sync::Sender, task};
+use async_std::{
+    prelude::*,
+    sync::{Receiver, Sender},
+    task,
+};
 use clobber::{tuning, PidController, WorkerPool};
 use http_types::StatusCode;
 use log::{info, warn, LevelFilter};
@@ -19,47 +23,45 @@ fn main() {
     start_test_server();
 
     task::block_on(async {
-        let rps = 100;
-        let ticks_per_second = 10;
-        let tick_duration = Duration::from_millis(1000 / ticks_per_second as u64);
+        let rps = 1000;
         let url = "http://localhost:8000/hello/server";
 
-        let mut pool = WorkerPool::new(load_url_n_times, 1);
-        let mut pid = PidController::new((0.8, 0.2, 0.2));
+        let mut pool = WorkerPool::new(load_url_forver, 1);
+        let mut pid = PidController::new((0.8, 0.0, 0.0));
 
+        // note that we don't directly control the speed of this loop, we just assume the work takes time
         loop {
             let start_time = Instant::now();
 
-            // distribute work between workers
-            let per_tick = rps / ticks_per_second;
-            let per_worker = per_tick / pool.num_workers();
-            for _ in 0..pool.num_workers() {
-                pool.push((url, per_worker))
+            for _ in 0..pool.target_workers() {
+                pool.push((url, 100))
             }
 
             // perform the work
-            while let Some(_) = pool.next().await {}
+            let mut total_work = 0;
+            while let Some(_) = pool.next().await {
+                total_work += 1;
+            }
 
             // see how we did
             let duration = Instant::now().duration_since(start_time);
-            let actual_rps = duration.as_secs_f32() * per_tick as f32;
+            let actual_rps = total_work as f32 / duration.as_secs_f32();
 
-            dbg!(actual_rps);
+            // tell our controller about it
+            pid.update(rps as f32, actual_rps);
 
-            // if we're ahead of the workload we can rest
-            if duration < tick_duration {
-                task::sleep(tick_duration).await;
-            } else {
-                println!("behind by {:.3}s", (duration - tick_duration).as_secs_f32())
-            }
+            //
+            dbg!(actual_rps, pid.output());
         }
     });
 }
 
-// this is a small-ish batch of work for one worker
-async fn load_url_n_times(config: (&str, usize), send: Sender<JobResult>) {
+/// This is a single worker method that makes constant HTTP GET requests
+/// until the Receiver channel gets a close method.
+///
+async fn load_url_forver(config: (&str, Receiver<()>), send: Sender<JobResult>) {
     let (url, n) = config;
-    for _ in 0..n {
+    loop {
         let start = Instant::now();
         let status = match surf::get(url).await {
             Ok(res) => res.status(),
