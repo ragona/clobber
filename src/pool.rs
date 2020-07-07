@@ -252,42 +252,38 @@ mod tests {
     use futures_await_test::async_test;
     use std::time::Duration;
 
-    /// Double the input until we receive a close message
-    async fn double(job: Job<usize, usize>) {
-        let mut x = job.task;
-        loop {
+    /// Double the input some number of times or until we receive a close message
+    async fn double(job: Job<(usize, usize), usize>) {
+        let (mut i, n) = job.task;
+        for _ in 0..n {
             match job.close.try_recv() {
                 Ok(_) => break,
                 Err(_) => {}
             }
 
-            x *= 2;
+            i *= 2;
 
-            job.results.send(x).await;
+            job.results.send(i).await;
 
             // pretend this is hard
-            task::sleep(Duration::from_secs(1)).await;
+            task::sleep(Duration::from_millis(100)).await;
         }
     }
 
     #[async_test]
     async fn pool_test() {
-        let num_workers = 4;
+        let num_workers = 2;
         let (send, recv) = channel(num_workers);
         let mut pool = WorkerPool::new(double, send, num_workers);
 
-        pool.push(1);
+        pool.push((1, 10));
+        pool.push((3, 10));
+        pool.push((6, 2));
 
+        // separate process to receive and analyze output from the worker queue
         task::spawn(async move {
-            for _ in 0..10 {
-                match recv.recv().await {
-                    Ok(out) => {
-                        dbg!(out);
-                    }
-                    Err(_) => {
-                        println!("oh no");
-                    }
-                }
+            while let Ok(out) = recv.recv().await {
+                dbg!(out);
             }
         });
 
