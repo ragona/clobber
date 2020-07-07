@@ -134,7 +134,7 @@ where
         }
     }
 
-    pub async fn start(&mut self) {
+    pub async fn work(&mut self) {
         task::block_on(async {
             loop {
                 // get waiting results and send to consumer
@@ -274,6 +274,6 @@ mod tests {
             }
         });
 
-        pool.start().await;
+        pool.work().await;
     }
 }
