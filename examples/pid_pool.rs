@@ -3,18 +3,15 @@
 //! Attempting to drive target HTTP request throughput via PID controller.
 //!
 
-use async_std::{
-    prelude::*,
-    sync::{Receiver, Sender},
-    task,
-};
-use clobber::{tuning, PidController, WorkerPool};
+use async_std::{sync::channel, task};
 use http_types::StatusCode;
-use log::{info, warn, LevelFilter};
+use log::LevelFilter;
 use std::time::{Duration, Instant};
 use surf;
 use tokio::runtime::Runtime;
 use warp::Filter;
+
+use clobber::{Job, PidController, WorkerPool};
 
 type JobResult = (StatusCode, Duration);
 
@@ -23,53 +20,47 @@ fn main() {
     start_test_server();
 
     task::block_on(async {
-        let rps = 1000;
+        let goal_rps = 1000;
         let url = "http://localhost:8000/hello/server";
+        let num_workers = 2;
 
-        let mut pool = WorkerPool::new(load_url_forver, 1);
+        let (send, recv) = channel(num_workers);
         let mut pid = PidController::new((0.8, 0.0, 0.0));
+        let mut pool = WorkerPool::new(load_url_forever, send, num_workers);
 
-        // note that we don't directly control the speed of this loop, we just assume the work takes time
-        loop {
-            let start_time = Instant::now();
-
-            for _ in 0..pool.target_workers() {
-                pool.push((url, 100))
+        // separate process to receive and analyze output from the worker queue
+        task::spawn(async move {
+            // every n duration show shit to the pid and see how our tps has been
+            while let Ok(out) = recv.recv().await {
+                dbg!(out);
             }
+        });
 
-            // perform the work
-            let mut total_work = 0;
-            while let Some(_) = pool.next().await {
-                total_work += 1;
-            }
+        // Give each of our starting workers something to chew on. These last forever, so
+        // in this case we just want one task per worker.
+        pool.push(url);
+        pool.push(url);
 
-            // see how we did
-            let duration = Instant::now().duration_since(start_time);
-            let actual_rps = total_work as f32 / duration.as_secs_f32();
-
-            // tell our controller about it
-            pid.update(rps as f32, actual_rps);
-
-            //
-            dbg!(actual_rps, pid.output());
-        }
+        pool.work().await;
     });
 }
 
 /// This is a single worker method that makes constant HTTP GET requests
 /// until the Receiver channel gets a close method.
-///
-async fn load_url_forver(config: (&str, Receiver<()>), send: Sender<JobResult>) {
-    let (url, n) = config;
+async fn load_url_forever(job: Job<&str, JobResult>) {
     loop {
+        if job.stop_requested() {
+            break;
+        }
+
         let start = Instant::now();
-        let status = match surf::get(url).await {
+        let status = match surf::get(job.task).await {
             Ok(res) => res.status(),
             Err(err) => err.status(),
         };
         let diff = Instant::now().duration_since(start);
 
-        send.send((status, diff)).await;
+        job.results.send((status, diff)).await;
     }
 }
 

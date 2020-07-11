@@ -61,14 +61,21 @@ enum WorkerPoolCommand {
 // todo command channel
 
 pub struct Job<In, Out> {
-    task: In,
-    close: Receiver<()>,
-    results: Sender<Out>,
+    pub task: In,
+    pub close: Receiver<()>,
+    pub results: Sender<Out>,
 }
 
 impl<In, Out> Job<In, Out> {
     pub fn new(task: In, close: Receiver<()>, results: Sender<Out>) -> Self {
         Self { task, close, results }
+    }
+
+    pub fn stop_requested(&self) -> bool {
+        match self.close.try_recv() {
+            Ok(_) => true,
+            Err(_) => false,
+        }
     }
 }
 
@@ -243,13 +250,15 @@ mod tests {
     async fn double(job: Job<(usize, usize), usize>) {
         let (mut i, n) = job.task;
         for _ in 0..n {
-            match job.close.try_recv() {
-                Ok(_) => break,
-                Err(_) => {}
+            // play nice with the pool by allowing it to stop this loop early
+            if job.stop_requested() {
+                break;
             }
 
+            // do the actual work
             i *= 2;
 
+            // send it to the pool for collection so it can be sent along to listeners
             job.results.send(i).await;
 
             // pretend this is hard
