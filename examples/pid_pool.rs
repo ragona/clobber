@@ -38,8 +38,9 @@ fn main() {
 
         // Give each of our starting workers something to chew on. These last forever, so
         // in this case we just want one task per worker.
-        pool.push(url);
-        pool.push(url);
+        for _ in 0..num_workers {
+            pool.push(url);
+        }
 
         pool.work().await;
     });
