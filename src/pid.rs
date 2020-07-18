@@ -25,7 +25,7 @@ impl Controller {
             ControllerType::Derivative => error - self.error,
         };
 
-        debug!("{:#?}, {}", self.controller_type, self.error);
+        println!("{:#?}, {}", self.controller_type, self.error);
     }
 
     pub fn output(&self) -> f32 {
@@ -58,7 +58,7 @@ impl PidController {
         self.i.update(error);
         self.d.update(error);
 
-        debug!("PidController, {}", self.output());
+        println!("PidController, {}", self.output());
     }
 
     pub fn output(&self) -> f32 {

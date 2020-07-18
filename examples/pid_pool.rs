@@ -5,17 +5,18 @@
 
 use async_std::{sync::channel, task};
 use http_types::StatusCode;
-use log::{warn, LevelFilter};
+use log::{debug, warn, LevelFilter};
 use std::time::{Duration, Instant};
 use surf;
 use tokio::runtime::Runtime;
 use warp::Filter;
 
+use crate::Distribution::Percentile;
 use async_std::sync::Receiver;
 use clobber::{Job, PidController, WorkerPool};
 use std::{
     cmp::Ordering::Equal,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt::{Debug, Formatter},
 };
 
@@ -34,20 +35,28 @@ struct Metric {
 #[derive(Clone)]
 struct RequestTracker {
     start: Instant,
-    responses: Vec<Metric>,
+    /// RequestTracker keeps track of the previous `size` requests
+    size: usize,
+    count: usize,
+    responses: VecDeque<Metric>,
 }
 
 impl RequestTracker {
-    pub fn new() -> Self {
-        Self { start: Instant::now(), responses: vec![] }
+    pub fn new(size: usize) -> Self {
+        Self { size, start: Instant::now(), count: 0, responses: VecDeque::with_capacity(size) }
     }
 
     pub fn count(&self) -> usize {
-        self.responses.len()
+        self.count
     }
 
     pub fn add(&mut self, metric: Metric) {
-        self.responses.push(metric);
+        if self.responses.len() >= self.size {
+            self.responses.pop_front();
+        }
+
+        self.count += 1;
+        self.responses.push_back(metric);
     }
 
     pub fn rps(&self) -> f32 {
@@ -107,19 +116,18 @@ impl Debug for RequestTracker {
 }
 
 fn main() {
-    start_logger(LevelFilter::Warn);
     start_test_server();
 
     task::block_on(async {
         let goal_rps = 1000f32;
         let url = "http://localhost:8000/hello/server";
         let num_workers = 2;
-        let tick_rate = Duration::from_secs_f32(1.0);
+        let tick_rate = Duration::from_secs_f32(0.1);
 
         let (send, recv) = channel(num_workers);
         let mut pid = PidController::new((0.8, 0.0, 0.0));
-        let mut pool = WorkerPool::new(load_url_forever, send, num_workers);
-        let mut tracker = RequestTracker::new();
+        let mut pool = WorkerPool::new(load_url, send, num_workers);
+        let mut tracker = RequestTracker::new(goal_rps.floor() as usize);
 
         // separate process to receive and analyze output from the worker queue
         task::spawn(async move {
@@ -133,7 +141,16 @@ fn main() {
                 if Instant::now() > next_tick {
                     tick_start = Instant::now();
                     next_tick = tick_start + tick_rate;
-                    dbg!(&tracker);
+
+                    pid.update(goal_rps, tracker.rps());
+
+                    println!(
+                        "Tracker, {}, {}, {}, {}",
+                        tracker.count(),
+                        tracker.rps(),
+                        tracker.latency_percentile(0.5, StatusCode::Ok).as_micros(),
+                        tracker.latency_percentile(0.99, StatusCode::Ok).as_micros(),
+                    );
                 }
             }
 
@@ -148,7 +165,7 @@ fn main() {
         // Give each of our starting workers something to chew on. These last forever, so
         // in this case we just want one task per worker.
         for _ in 0..num_workers {
-            pool.push(&url);
+            pool.push((&url, None));
         }
 
         pool.work().await;
@@ -157,14 +174,33 @@ fn main() {
 
 /// This is a single worker method that makes constant HTTP GET requests
 /// until the Receiver channel gets a close method.
-async fn load_url_forever(job: Job<&str, Metric>) {
-    loop {
+async fn load_url(job: Job<(&str, Option<usize>), Metric>) {
+    let (url, mut count) = job.task;
+
+    let mut done = || {
         if job.stop_requested() {
-            break;
+            return true;
         }
 
+        // no count means run until canceled
+        if count.is_none() {
+            return false;
+        }
+
+        let remaining = count.unwrap(); // safe, just checked is_none
+
+        if remaining == 0 {
+            return true;
+        }
+
+        count = Some(remaining - 1);
+
+        false
+    };
+
+    while !done() {
         let start = Instant::now();
-        let status = match surf::get(job.task).await {
+        let status = match surf::get(url).await {
             Ok(res) => res.status(),
             Err(err) => err.status(),
         };
