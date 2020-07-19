@@ -27,7 +27,7 @@ fn main() {
     task::block_on(async {
         let goal_rps = 1000f32;
         let url = "http://localhost:8000/hello/server";
-        let num_workers = 2;
+        let num_workers = 1;
         let tick_rate = Duration::from_secs_f32(0.1);
 
         let (send, recv) = channel(num_workers);
@@ -187,12 +187,13 @@ fn start_logger(log_level: LevelFilter) {
             fern::Dispatch::new()
                 .level(log_level)
                 .filter(|metadata| metadata.target() == "clobber::pid")
-                .chain(fern::log_file("pid-tuning.log").unwrap()),
+                .chain(fern::log_file("examples/.logs/pid-tuning.log").unwrap()),
         )
         .chain(
             fern::Dispatch::new()
                 .level(log_level)
                 .filter(|metadata| metadata.target() == "pid_pool")
+                .chain(fern::log_file("examples/.logs/results.log").unwrap())
                 .chain(std::io::stdout()),
         )
         .apply()
@@ -202,10 +203,17 @@ fn start_logger(log_level: LevelFilter) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::error::Error;
+    use clobber::tuning;
+    use std::{error::Error, path::Path};
 
     #[test]
     fn graph_log() -> Result<(), Box<dyn Error>> {
+        tuning::filter_log(Path::new("examples/.logs/pid-tuning.log"), "Proportional", "p.log")?;
+        tuning::filter_log(Path::new("examples/.logs/pid-tuning.log"), "Integral", "i.log")?;
+        tuning::filter_log(Path::new("examples/.logs/pid-tuning.log"), "Derivative", "d.log")?;
+        tuning::filter_log(Path::new("examples/.logs/pid-tuning.log"), "PidController", "pid.log")?;
+        tuning::filter_log(Path::new("examples/.logs/results.log"), "pid_pool", "rps.log")?;
+
         Ok(())
     }
 }
