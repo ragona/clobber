@@ -49,7 +49,7 @@ fn main() {
                 if Instant::now() > next_tick {
                     pid.update(goal_rps, tick_tracker.rps());
 
-                    debug!("tick, {}, {}", overall_tracker.count(), tick_tracker.rps());
+                    debug!("{}, {}", overall_tracker.count(), tick_tracker.rps());
 
                     tick_start = Instant::now();
                     next_tick = tick_start + tick_rate;
@@ -177,11 +177,10 @@ fn start_logger(log_level: LevelFilter) {
     fern::Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
-                "{} [{}][{}] {}",
-                chrono::Local::now().format("%H:%M:%S,"),
+                "{}, {}, {}",
                 record.target(),
-                record.level(),
-                message
+                chrono::Local::now().format("%H:%M:%S.%3f"),
+                message,
             ))
         })
         .chain(
@@ -198,4 +197,15 @@ fn start_logger(log_level: LevelFilter) {
         )
         .apply()
         .expect("failed to start logger");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn graph_log() -> Result<(), Box<dyn Error>> {
+        Ok(())
+    }
 }
