@@ -15,7 +15,7 @@ use crate::Distribution::Percentile;
 use async_std::sync::Receiver;
 use clobber::{Job, JobStatus, PidController, WorkerPool, WorkerPoolCommand};
 use std::{
-    cmp::Ordering::Equal,
+    cmp::{max, Ordering::Equal},
     collections::{HashMap, VecDeque},
     fmt::{Debug, Formatter},
 };
@@ -25,16 +25,18 @@ fn main() {
     start_test_server();
 
     task::block_on(async {
-        let goal_rps = 10000f32;
+        let goal_rps = 100000f32;
         let url = "http://localhost:8000/hello/server";
         let tick_rate = Duration::from_secs_f32(0.1);
         let num_workers = 1;
 
         let (send, recv) = channel(num_workers);
-        let mut pid = PidController::new((0.1, 0.5, 0.5));
+        let mut pid = PidController::new((0.1, 0.1, 0.1));
         let mut pool = WorkerPool::new(load_url, send, num_workers);
         let mut overall_tracker = RequestTracker::new();
         let commands = pool.command_channel();
+
+        // todo: Add second tickrate to actual make changes, other one is just evaluation?
 
         // separate process to receive and analyze output from the worker queue
         task::spawn(async move {
@@ -49,12 +51,15 @@ fn main() {
 
                 if Instant::now() > next_tick {
                     pid.update(goal_rps, tick_tracker.rps());
-                    let mut new_worker_cnt = pid.output() * 0.01;
-                    new_worker_cnt /= 1.0 / tick_rate.as_secs_f32();
+                    let mut new_worker_cnt = pid.output() * 0.001 * tick_rate.as_secs_f32();
+                    if new_worker_cnt < 0.0 {
+                        new_worker_cnt = 0.0;
+                    }
+
                     commands
                         .send(WorkerPoolCommand::SetWorkerCount(new_worker_cnt.round() as usize));
 
-                    debug!("{}, {}", new_worker_cnt.round(), tick_tracker.rps());
+                    debug!("{}, {}", new_worker_cnt, tick_tracker.rps());
 
                     tick_start = Instant::now();
                     next_tick = tick_start + tick_rate;

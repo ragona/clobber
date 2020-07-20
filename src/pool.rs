@@ -114,7 +114,7 @@ where
     /// This is the number of workers we haven't tried to stop yet plus the workers that haven't
     /// noticed they were told to stop.
     pub fn cur_workers(&self) -> usize {
-        self.cur_workers
+        self.cur_workers - self.outstanding_stops
     }
 
     /// Target number of workers
@@ -196,6 +196,12 @@ where
                     return false;
                 }
                 WorkerPoolCommand::SetWorkerCount(n) => {
+                    let n = match n {
+                        0 => 1,
+                        n => n,
+                    };
+
+                    println!("{}, {}", n, self.num_workers);
                     self.num_workers = n;
                 }
             }
@@ -257,14 +263,9 @@ where
     /// Sends out messages if any of our workers have delivered results
     pub async fn balance_workers(&mut self) {
         if self.cur_workers() < self.target_workers() {
-            if !self.queue.is_empty() && !self.at_target_worker_count() {
-                self.start_worker();
-            }
+            self.start_worker();
         } else if self.cur_workers() > self.target_workers() {
-            if self.cur_workers() + self.outstanding_stops > 0 {
-                println!("stop");
-                self.send_stop_work_message().await;
-            }
+            self.send_stop_work_message().await;
         }
     }
 }
