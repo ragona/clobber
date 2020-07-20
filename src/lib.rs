@@ -5,7 +5,7 @@ mod pool;
 pub mod tuning;
 
 pub use pid::PidController;
-pub use pool::{Job, WorkerPool};
+pub use pool::{Job, JobStatus, WorkerPool, WorkerPoolCommand};
 
 #[cfg(test)]
 mod tests {

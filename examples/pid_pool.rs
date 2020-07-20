@@ -13,7 +13,7 @@ use warp::Filter;
 
 use crate::Distribution::Percentile;
 use async_std::sync::Receiver;
-use clobber::{Job, PidController, WorkerPool};
+use clobber::{Job, JobStatus, PidController, WorkerPool, WorkerPoolCommand};
 use std::{
     cmp::Ordering::Equal,
     collections::{HashMap, VecDeque},
@@ -25,15 +25,16 @@ fn main() {
     start_test_server();
 
     task::block_on(async {
-        let goal_rps = 1000f32;
+        let goal_rps = 10000f32;
         let url = "http://localhost:8000/hello/server";
-        let num_workers = 1;
         let tick_rate = Duration::from_secs_f32(0.1);
+        let num_workers = 1;
 
         let (send, recv) = channel(num_workers);
-        let mut pid = PidController::new((0.8, 0.2, 0.2));
+        let mut pid = PidController::new((0.1, 0.5, 0.5));
         let mut pool = WorkerPool::new(load_url, send, num_workers);
         let mut overall_tracker = RequestTracker::new();
+        let commands = pool.command_channel();
 
         // separate process to receive and analyze output from the worker queue
         task::spawn(async move {
@@ -48,8 +49,12 @@ fn main() {
 
                 if Instant::now() > next_tick {
                     pid.update(goal_rps, tick_tracker.rps());
+                    let mut new_worker_cnt = pid.output() * 0.01;
+                    new_worker_cnt /= 1.0 / tick_rate.as_secs_f32();
+                    commands
+                        .send(WorkerPoolCommand::SetWorkerCount(new_worker_cnt.round() as usize));
 
-                    debug!("{}, {}", overall_tracker.count(), tick_tracker.rps());
+                    debug!("{}, {}", new_worker_cnt.round(), tick_tracker.rps());
 
                     tick_start = Instant::now();
                     next_tick = tick_start + tick_rate;
@@ -67,7 +72,7 @@ fn main() {
 
         // Give each of our starting workers something to chew on. These last forever, so
         // in this case we just want one task per worker.
-        for _ in 0..num_workers {
+        for _ in 0..500 {
             pool.push((&url, None));
         }
 
@@ -123,31 +128,37 @@ impl Debug for RequestTracker {
 
 /// This is a single worker method that makes constant HTTP GET requests
 /// until the Receiver channel gets a close method.
-async fn load_url(job: Job<(&str, Option<usize>), Metric>) {
+async fn load_url(job: Job<(&str, Option<usize>), Metric>) -> JobStatus {
     let (url, mut count) = job.task;
 
-    let mut done = || {
+    let mut get_status = || {
         if job.stop_requested() {
-            return true;
+            return JobStatus::Stopped;
         }
 
         // no count means run until canceled
         if count.is_none() {
-            return false;
+            return JobStatus::Running;
         }
 
         let remaining = count.unwrap(); // safe, just checked is_none
 
         if remaining == 0 {
-            return true;
+            return JobStatus::Done;
         }
 
         count = Some(remaining - 1);
 
-        false
+        JobStatus::Running
     };
 
-    while !done() {
+    loop {
+        match get_status() {
+            JobStatus::Done => return JobStatus::Done,
+            JobStatus::Stopped => return JobStatus::Stopped,
+            JobStatus::Running => {}
+        }
+
         let start = Instant::now();
         let status = match surf::get(url).await {
             Ok(res) => res.status(),

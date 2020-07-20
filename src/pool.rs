@@ -44,18 +44,22 @@ pub struct WorkerPool<In, Out, F> {
     /// Used to stop workers before they self-terminate
     close_channel: (Sender<()>, Receiver<()>),
     /// Unbounded internal event and command bus, processed every tick.
-    events_channel: (CrossbeamSender<WorkerPoolEvent>, CrossbeamReceiver<WorkerPoolEvent>),
+    worker_events: (CrossbeamSender<WorkerEvent>, CrossbeamReceiver<WorkerEvent>),
+    command_events: (CrossbeamSender<WorkerPoolCommand>, CrossbeamReceiver<WorkerPoolCommand>),
+
+    outstanding_stops: usize,
 }
 
 #[derive(Debug, Copy, Clone)]
-enum WorkerPoolEvent {
+enum WorkerEvent {
     WorkerDone,
-    Command(WorkerPoolCommand),
+    WorkerStopped,
 }
 
 #[derive(Debug, Copy, Clone)]
-enum WorkerPoolCommand {
+pub enum WorkerPoolCommand {
     Stop,
+    SetWorkerCount(usize),
 }
 
 // todo command channel
@@ -79,11 +83,17 @@ impl<In, Out> Job<In, Out> {
     }
 }
 
+pub enum JobStatus {
+    Done,
+    Stopped,
+    Running,
+}
+
 impl<In, Out, F> WorkerPool<In, Out, F>
 where
-    In: Send + Sync + Unpin + 'static,
+    In: Send + Sync + 'static,
     Out: Send + Sync + 'static,
-    F: Future<Output = ()> + Send + 'static,
+    F: Future<Output = JobStatus> + Send + 'static,
 {
     pub fn new(task: fn(Job<In, Out>) -> F, output: Sender<Out>, num_workers: usize) -> Self {
         Self {
@@ -93,8 +103,10 @@ where
             cur_workers: 0,
             results_channel: channel(num_workers),
             close_channel: channel(num_workers),
-            events_channel: crossbeam_channel::unbounded(),
+            worker_events: crossbeam_channel::unbounded(),
+            command_events: crossbeam_channel::unbounded(),
             queue: VecDeque::with_capacity(num_workers),
+            outstanding_stops: 0,
         }
     }
 
@@ -141,18 +153,19 @@ where
         }
     }
 
+    pub fn command_channel(&self) -> crossbeam_channel::Sender<WorkerPoolCommand> {
+        self.command_events.0.clone()
+    }
+
     pub async fn work(&mut self) {
         task::block_on(async {
             loop {
-                // get waiting results and send to consumer
                 self.flush_output().await;
 
-                // update state from our event bus
                 if !self.event_loop() {
                     break;
                 }
 
-                // Get us to our target number of workers
                 self.balance_workers().await;
 
                 if !self.working() {
@@ -162,19 +175,29 @@ where
         })
     }
 
+    /// Processes outstanding command and worker events
     /// Returns whether or not to continue execution.
     fn event_loop(&mut self) -> bool {
-        while let Ok(event) = self.events_channel.1.try_recv() {
+        while let Ok(event) = self.worker_events.1.try_recv() {
             match event {
-                WorkerPoolEvent::WorkerDone => {
-                    // This means a worker actually stopped; either on its own or from a stop cmd.
+                WorkerEvent::WorkerDone => {
                     self.cur_workers -= 1;
                 }
-                WorkerPoolEvent::Command(command) => match command {
-                    WorkerPoolCommand::Stop => {
-                        return false;
-                    }
-                },
+                WorkerEvent::WorkerStopped => {
+                    self.cur_workers -= 1;
+                    self.outstanding_stops -= 1;
+                }
+            }
+        }
+
+        while let Ok(command) = self.command_events.1.try_recv() {
+            match command {
+                WorkerPoolCommand::Stop => {
+                    return false;
+                }
+                WorkerPoolCommand::SetWorkerCount(n) => {
+                    self.num_workers = n;
+                }
             }
         }
 
@@ -202,7 +225,7 @@ where
         let task = self.queue.pop_front().unwrap();
         let work_send = self.results_channel.0.clone();
         let close_recv = self.close_channel.1.clone();
-        let event_send = self.events_channel.0.clone();
+        let event_send = self.worker_events.0.clone();
         let job = Job::new(task, close_recv, work_send);
         let fut = (self.task)(job);
 
@@ -210,8 +233,14 @@ where
         // it so that we can spin up a replacement. This is done through an unbounded crossbeam
         // channnel that is processed every tick to update state.
         async_std::task::spawn(async move {
-            fut.await;
-            event_send.send(WorkerPoolEvent::WorkerDone).expect("failed to send WorkerEvent::Done");
+            let status = fut.await;
+            let message = match status {
+                JobStatus::Done => WorkerEvent::WorkerDone,
+                JobStatus::Stopped => WorkerEvent::WorkerStopped,
+                JobStatus::Running => panic!("this shouldn't happen"),
+            };
+
+            event_send.send(message).expect("failed to send WorkerEvent");
         });
 
         self.cur_workers += 1;
@@ -220,19 +249,20 @@ where
     /// Find a listening worker and tell it to stop.
     /// Doesn't forcibly kill in-progress tasks.
     async fn send_stop_work_message(&mut self) {
+        self.outstanding_stops += 1;
         self.close_channel.0.send(()).await;
     }
 
     /// Pops tasks from the queue if we have available worker capacity
     /// Sends out messages if any of our workers have delivered results
-    async fn balance_workers(&mut self) {
-        if self.cur_workers() <= self.target_workers() {
-            // add workers until we're full
-            while !self.queue.is_empty() && !self.at_target_worker_count() {
+    pub async fn balance_workers(&mut self) {
+        if self.cur_workers() < self.target_workers() {
+            if !self.queue.is_empty() && !self.at_target_worker_count() {
                 self.start_worker();
             }
-        } else {
-            while !self.at_target_worker_count() {
+        } else if self.cur_workers() > self.target_workers() {
+            if self.cur_workers() + self.outstanding_stops > 0 {
+                println!("stop");
                 self.send_stop_work_message().await;
             }
         }
