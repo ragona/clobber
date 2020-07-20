@@ -25,7 +25,7 @@ fn main() {
     start_test_server();
 
     task::block_on(async {
-        let goal_rps = 100000f32;
+        let goal_rps = 10000f32;
         let url = "http://localhost:8000/hello/server";
         let tick_rate = Duration::from_secs_f32(0.1);
         let num_workers = 1;
@@ -36,47 +36,26 @@ fn main() {
         let mut overall_tracker = RequestTracker::new();
         let commands = pool.command_channel();
 
-        // todo: Add second tickrate to actual make changes, other one is just evaluation?
-
-        // separate process to receive and analyze output from the worker queue
         task::spawn(async move {
-            let mut tick_start = Instant::now();
-            let mut next_tick = tick_start + tick_rate;
-            let mut tick_tracker = RequestTracker::new();
+            loop {
+                let mut tick = Tick::new(tick_rate);
 
-            // loop through results on the output channel
-            while let Ok(metric) = recv.recv().await {
-                overall_tracker.add(metric);
-                tick_tracker.add(metric);
+                while let Ok(metric) = recv.recv().await {
+                    overall_tracker.add(metric);
+                    tick.tracker.add(metric);
 
-                if Instant::now() > next_tick {
-                    pid.update(goal_rps, tick_tracker.rps());
-                    let mut new_worker_cnt = pid.output() * 0.001 * tick_rate.as_secs_f32();
-                    if new_worker_cnt < 0.0 {
-                        new_worker_cnt = 0.0;
+                    if tick.done() {
+                        debug!("{}, {}", pid.output(), tick.tracker.rps());
+
+                        pid.update(goal_rps, tick.tracker.rps());
+                        tick = Tick::new(tick_rate);
                     }
-
-                    commands
-                        .send(WorkerPoolCommand::SetWorkerCount(new_worker_cnt.round() as usize));
-
-                    debug!("{}, {}", new_worker_cnt, tick_tracker.rps());
-
-                    tick_start = Instant::now();
-                    next_tick = tick_start + tick_rate;
-                    tick_tracker = RequestTracker::new();
                 }
-            }
-
-            let tick_actual = Instant::now().duration_since(tick_start);
-            if tick_actual < tick_rate {
-                task::sleep(tick_rate - tick_actual).await;
-            } else {
-                warn!("falling behind; wanted tick rate of {:?} got {:?}", tick_rate, tick_actual);
             }
         });
 
         // Give each of our starting workers something to chew on. These last forever, so
-        // in this case we just want one task per worker.
+        // in this case we just want one task per worker. // todo: Fix (clone default job?)
         for _ in 0..500 {
             pool.push((&url, None));
         }
@@ -102,6 +81,31 @@ struct RequestTracker {
     /// RequestTracker keeps track of the previous `size` requests
     count: usize,
     start: Instant,
+}
+
+struct Tick {
+    pub start: Instant,
+    pub end: Instant,
+    pub tracker: RequestTracker,
+}
+
+impl Tick {
+    pub fn new(duration: Duration) -> Self {
+        let now = Instant::now();
+        Self { start: now, end: now + duration, tracker: RequestTracker::new() }
+    }
+
+    pub fn done(&self) -> bool {
+        Instant::now() >= self.end
+    }
+
+    pub fn ms_late(&self) -> f32 {
+        if !self.done() {
+            return 0.0;
+        }
+
+        Instant::now().duration_since(self.start).as_secs_f32()
+    }
 }
 
 impl RequestTracker {
