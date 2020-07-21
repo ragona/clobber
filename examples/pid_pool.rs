@@ -44,7 +44,13 @@ fn main() {
                 tick.tracker.add(metric);
 
                 if tick.done() {
-                    debug!("{}, {}", pid.output(), tick.tracker.rps());
+                    debug!(
+                        "{}, {}, {}, {}",
+                        pid.output(),
+                        tick.tracker.rps(),
+                        num_workers,
+                        float_workers
+                    );
 
                     pid.update(goal_rps, tick.tracker.rps());
 

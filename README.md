@@ -224,3 +224,7 @@ impl PidController {
 ```
 
 The liberty I'm taking here is in calling at a fixed interval and simply integrating and deriving one step at a time, which dramatically simplifies each formula.
+
+## A working PID controller
+
+
