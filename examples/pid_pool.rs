@@ -11,7 +11,6 @@ use surf;
 use tokio::runtime::Runtime;
 use warp::Filter;
 
-use crate::Distribution::Percentile;
 use async_std::sync::Receiver;
 use clobber::{Job, JobStatus, PidController, WorkerPool, WorkerPoolCommand};
 use std::{
@@ -25,31 +24,37 @@ fn main() {
     start_test_server();
 
     task::block_on(async {
-        let goal_rps = 10000f32;
+        let goal_rps = 4000f32;
         let url = "http://localhost:8000/hello/server";
         let tick_rate = Duration::from_secs_f32(0.1);
-        let num_workers = 1;
+        let (send, recv) = channel(1024); // todo max workers?
 
-        let (send, recv) = channel(num_workers);
-        let mut pid = PidController::new((0.1, 0.1, 0.1));
-        let mut pool = WorkerPool::new(load_url, send, num_workers);
-        let mut overall_tracker = RequestTracker::new();
-        let commands = pool.command_channel();
+        let mut float_workers = 1.0; // this is the thing we're actually driving
+        let mut num_workers = 1;
+        let mut pid = PidController::new((0.00001, 0.0, 0.0));
+        let mut pool = WorkerPool::new(load_url, send, 1);
+        let mut request_tracker = RequestTracker::new();
+        let command = pool.command_channel();
 
         task::spawn(async move {
-            loop {
-                let mut tick = Tick::new(tick_rate);
+            let mut tick = Tick::new(tick_rate);
 
-                while let Ok(metric) = recv.recv().await {
-                    overall_tracker.add(metric);
-                    tick.tracker.add(metric);
+            while let Ok(metric) = recv.recv().await {
+                request_tracker.add(metric);
+                tick.tracker.add(metric);
 
-                    if tick.done() {
-                        debug!("{}, {}", pid.output(), tick.tracker.rps());
+                if tick.done() {
+                    debug!("{}, {}", pid.output(), tick.tracker.rps());
 
-                        pid.update(goal_rps, tick.tracker.rps());
-                        tick = Tick::new(tick_rate);
+                    pid.update(goal_rps, tick.tracker.rps());
+
+                    float_workers += pid.output();
+                    if float_workers.floor() as usize != num_workers {
+                        num_workers = float_workers.floor() as usize;
+                        command.send(WorkerPoolCommand::SetWorkerCount(num_workers));
                     }
+
+                    tick = Tick::new(tick_rate);
                 }
             }
         });
@@ -65,12 +70,6 @@ fn main() {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum Distribution {
-    Average,
-    Percentile(f32),
-}
-
-#[derive(Debug, Copy, Clone)]
 struct Metric {
     pub result: StatusCode,
     pub duration: Duration,
@@ -78,7 +77,6 @@ struct Metric {
 
 #[derive(Clone)]
 struct RequestTracker {
-    /// RequestTracker keeps track of the previous `size` requests
     count: usize,
     start: Instant,
 }
