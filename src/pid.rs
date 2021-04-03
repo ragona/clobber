@@ -1,5 +1,3 @@
-use log::debug;
-
 #[derive(Debug)]
 enum ControllerType {
     Proportional,
@@ -24,8 +22,6 @@ impl Controller {
             ControllerType::Integral => (error + self.error) / 2.0,
             ControllerType::Derivative => error - self.error,
         };
-
-        debug!("{:#?}, {}", self.controller_type, self.error);
     }
 
     pub fn output(&self) -> f32 {
@@ -57,8 +53,6 @@ impl PidController {
         self.p.update(error);
         self.i.update(error);
         self.d.update(error);
-
-        debug!("PidController, {}", self.output());
     }
 
     pub fn output(&self) -> f32 {
