@@ -56,7 +56,7 @@ To wikipedia!
 
 Don't worry, we can break this down. 
 These kinds of formulas used to freak me out, but after spending enough time working with cryptographers I realized mathmeticans are just programmers who prefer walls to computers.
-The poor dears work on chalkboards and haven't the typing speed to use what we would consider polite variable names, so they resort to the greek alphabet to avoid multi-letter variables.
+The rich history of mathmatics is much older than computers, so it's rather efficient, which makes it super hard to read.
 If you had to write all of your variables with chalk you'd use funny letters too.
 
 Each of the three major areas is an independent controller that uses its own strategy to move us towards our goal value. 
